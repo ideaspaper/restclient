@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"restclient/pkg/models"
@@ -118,7 +120,7 @@ func (hm *HistoryManager) Remove(index int) error {
 		return fmt.Errorf("index out of range: %d", index)
 	}
 
-	hm.items = append(hm.items[:index], hm.items[index+1:]...)
+	hm.items = slices.Delete(hm.items, index, index+1)
 	return hm.save()
 }
 
@@ -162,47 +164,26 @@ func truncateURL(url string, maxLen int) string {
 
 // containsIgnoreCase checks if s contains substr (case-insensitive)
 func containsIgnoreCase(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		(len(substr) > 0 && containsCI(s, substr)))
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
-func containsCI(s, substr string) bool {
-	sLower := make([]byte, len(s))
-	substrLower := make([]byte, len(substr))
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 32
-		}
-		sLower[i] = c
+// extractDomain extracts domain from URL
+func extractDomain(urlStr string) string {
+	// Simple domain extraction
+	start := 0
+	if idx := strings.Index(urlStr, "://"); idx >= 0 {
+		start = idx + 3
 	}
 
-	for i := 0; i < len(substr); i++ {
-		c := substr[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 32
-		}
-		substrLower[i] = c
-	}
-
-	return indexOf(sLower, substrLower) >= 0
-}
-
-func indexOf(s, substr []byte) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		found := true
-		for j := 0; j < len(substr); j++ {
-			if s[i+j] != substr[j] {
-				found = false
-				break
-			}
-		}
-		if found {
-			return i
+	end := len(urlStr)
+	for i := start; i < len(urlStr); i++ {
+		if urlStr[i] == '/' || urlStr[i] == ':' || urlStr[i] == '?' {
+			end = i
+			break
 		}
 	}
-	return -1
+
+	return urlStr[start:end]
 }
 
 // HistoryStats returns statistics about the history
@@ -239,25 +220,6 @@ func (hm *HistoryManager) GetStats() HistoryStats {
 	}
 
 	return stats
-}
-
-// extractDomain extracts domain from URL
-func extractDomain(urlStr string) string {
-	// Simple domain extraction
-	start := 0
-	if idx := indexOf([]byte(urlStr), []byte("://")); idx >= 0 {
-		start = idx + 3
-	}
-
-	end := len(urlStr)
-	for i := start; i < len(urlStr); i++ {
-		if urlStr[i] == '/' || urlStr[i] == ':' || urlStr[i] == '?' {
-			end = i
-			break
-		}
-	}
-
-	return urlStr[start:end]
 }
 
 // SortByTime sorts history items by time (newest first)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/md5"
+	cryptoRand "crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
@@ -21,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -562,13 +564,7 @@ func (s *awsSigner) sign(request *models.HttpRequest) error {
 	signedHeadersList = append(signedHeadersList, "host")
 
 	// Sort headers
-	for i := 0; i < len(signedHeadersList); i++ {
-		for j := i + 1; j < len(signedHeadersList); j++ {
-			if signedHeadersList[i] > signedHeadersList[j] {
-				signedHeadersList[i], signedHeadersList[j] = signedHeadersList[j], signedHeadersList[i]
-			}
-		}
-	}
+	slices.Sort(signedHeadersList)
 
 	for _, header := range signedHeadersList {
 		if header == "host" {
@@ -671,27 +667,15 @@ func getSignatureKey(secret, dateStamp, region, service string) []byte {
 
 func generateNonce() string {
 	b := make([]byte, 16)
-	io.ReadFull(rand.Reader, b)
-	return hex.EncodeToString(b)
-}
-
-var rand = struct{ Reader io.Reader }{Reader: randReader{}}
-
-type randReader struct{}
-
-func (randReader) Read(p []byte) (n int, err error) {
-	f, err := os.Open("/dev/urandom")
-	if err != nil {
-		// Fallback: use time-based seed
+	if _, err := cryptoRand.Read(b); err != nil {
+		// Fallback: use time-based seed (shouldn't happen in practice)
 		t := time.Now().UnixNano()
-		for i := range p {
-			p[i] = byte(t >> (i % 8))
+		for i := range b {
+			b[i] = byte(t >> (i % 8))
 			t = t*1103515245 + 12345
 		}
-		return len(p), nil
 	}
-	defer f.Close()
-	return f.Read(p)
+	return hex.EncodeToString(b)
 }
 
 // ClearCookies clears all stored cookies

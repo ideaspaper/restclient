@@ -1,7 +1,9 @@
 package parser
 
 import (
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"restclient/pkg/models"
@@ -55,9 +57,7 @@ func (p *CurlParser) Parse() (*models.HttpRequest, error) {
 
 	// Parse headers
 	headers := make(map[string]string)
-	for k, v := range p.defaultHeaders {
-		headers[k] = v
-	}
+	maps.Copy(headers, p.defaultHeaders)
 
 	headerValues := getArgValues(args, "-H", "--header")
 	for _, h := range headerValues {
@@ -276,10 +276,8 @@ func getArgValues(args []string, flags ...string) []string {
 // hasArg checks if a flag exists in arguments
 func hasArg(args []string, flags ...string) bool {
 	for _, arg := range args {
-		for _, flag := range flags {
-			if arg == flag {
-				return true
-			}
+		if slices.Contains(flags, arg) {
+			return true
 		}
 	}
 	return false

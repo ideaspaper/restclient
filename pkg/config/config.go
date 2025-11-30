@@ -1,57 +1,65 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/spf13/viper"
 
 	"restclient/pkg/client"
 )
 
-const configFileName = "config.json"
+const (
+	configFileName = "config"
+	configFileType = "json"
+)
 
 // Config represents the application configuration
 type Config struct {
 	// HTTP client settings
-	FollowRedirects bool `json:"followRedirect"`
-	TimeoutMs       int  `json:"timeoutInMilliseconds"`
-	RememberCookies bool `json:"rememberCookiesForSubsequentRequests"`
+	FollowRedirects bool `json:"followRedirect" mapstructure:"followRedirect"`
+	TimeoutMs       int  `json:"timeoutInMilliseconds" mapstructure:"timeoutInMilliseconds"`
+	RememberCookies bool `json:"rememberCookiesForSubsequentRequests" mapstructure:"rememberCookiesForSubsequentRequests"`
 
 	// Default headers
-	DefaultHeaders map[string]string `json:"defaultHeaders"`
+	DefaultHeaders map[string]string `json:"defaultHeaders" mapstructure:"defaultHeaders"`
 
 	// Environment variables
-	EnvironmentVariables map[string]map[string]string `json:"environmentVariables"`
+	EnvironmentVariables map[string]map[string]string `json:"environmentVariables" mapstructure:"environmentVariables"`
 
 	// Current environment
-	CurrentEnvironment string `json:"currentEnvironment"`
+	CurrentEnvironment string `json:"currentEnvironment" mapstructure:"currentEnvironment"`
 
 	// SSL settings
-	InsecureSSL    bool `json:"insecureSSL"`
-	ProxyStrictSSL bool `json:"proxyStrictSSL"`
+	InsecureSSL    bool `json:"insecureSSL" mapstructure:"insecureSSL"`
+	ProxyStrictSSL bool `json:"proxyStrictSSL" mapstructure:"proxyStrictSSL"`
 
 	// Proxy settings
-	Proxy                string   `json:"proxy"`
-	ExcludeHostsForProxy []string `json:"excludeHostsForProxy"`
+	Proxy                string   `json:"proxy" mapstructure:"proxy"`
+	ExcludeHostsForProxy []string `json:"excludeHostsForProxy" mapstructure:"excludeHostsForProxy"`
 
 	// Certificates
-	Certificates map[string]CertificateConfig `json:"certificates"`
+	Certificates map[string]CertificateConfig `json:"certificates" mapstructure:"certificates"`
 
 	// Display settings
-	PreviewOption string `json:"previewOption"` // full, headers, body, exchange
-	ShowColors    bool   `json:"showColors"`
+	PreviewOption string `json:"previewOption" mapstructure:"previewOption"` // full, headers, body, exchange
+	ShowColors    bool   `json:"showColors" mapstructure:"showColors"`
 
-	// File path (not serialized)
-	configPath string `json:"-"`
+	// Internal: viper instance and config path (not serialized)
+	v          *viper.Viper `json:"-" mapstructure:"-"`
+	configPath string       `json:"-" mapstructure:"-"`
 }
 
 // CertificateConfig holds certificate paths
 type CertificateConfig struct {
-	Cert       string `json:"cert,omitempty"`
-	Key        string `json:"key,omitempty"`
-	PFX        string `json:"pfx,omitempty"`
-	Passphrase string `json:"passphrase,omitempty"`
+	Cert       string `json:"cert,omitempty" mapstructure:"cert"`
+	Key        string `json:"key,omitempty" mapstructure:"key"`
+	PFX        string `json:"pfx,omitempty" mapstructure:"pfx"`
+	Passphrase string `json:"passphrase,omitempty" mapstructure:"passphrase"`
 }
 
 // DefaultConfig returns a new config with default values
@@ -75,7 +83,26 @@ func DefaultConfig() *Config {
 	}
 }
 
-// LoadConfig loads configuration from the default path
+// setDefaults sets default values in viper
+func setDefaults(v *viper.Viper) {
+	v.SetDefault("followRedirect", true)
+	v.SetDefault("timeoutInMilliseconds", 0)
+	v.SetDefault("rememberCookiesForSubsequentRequests", true)
+	v.SetDefault("defaultHeaders", map[string]string{
+		"User-Agent": "restclient-cli",
+	})
+	v.SetDefault("environmentVariables", map[string]map[string]string{
+		"$shared": {},
+	})
+	v.SetDefault("currentEnvironment", "")
+	v.SetDefault("insecureSSL", false)
+	v.SetDefault("proxyStrictSSL", true)
+	v.SetDefault("certificates", make(map[string]CertificateConfig))
+	v.SetDefault("previewOption", "full")
+	v.SetDefault("showColors", true)
+}
+
+// LoadConfig loads configuration from the default path using Viper
 func LoadConfig() (*Config, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -86,28 +113,103 @@ func LoadConfig() (*Config, error) {
 	return LoadConfigFromDir(configDir)
 }
 
-// LoadConfigFromDir loads configuration from a specific directory
+// LoadConfigFromDir loads configuration from a specific directory using Viper
 func LoadConfigFromDir(dir string) (*Config, error) {
-	configPath := filepath.Join(dir, configFileName)
+	v := viper.New()
 
-	// If config doesn't exist, return defaults
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		cfg := DefaultConfig()
-		cfg.configPath = configPath
-		return cfg, nil
-	}
+	// Set defaults
+	setDefaults(v)
 
-	data, err := os.ReadFile(configPath)
-	if err != nil {
+	// Configure Viper
+	v.SetConfigName(configFileName)
+	v.SetConfigType(configFileType)
+	v.AddConfigPath(dir)
+
+	// Allow environment variable overrides with prefix RESTCLIENT_
+	v.SetEnvPrefix("RESTCLIENT")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	configPath := filepath.Join(dir, configFileName+"."+configFileType)
+
+	// Try to read config file
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// Config file not found, use defaults
+			cfg := DefaultConfig()
+			cfg.v = v
+			cfg.configPath = configPath
+			return cfg, nil
+		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	cfg := DefaultConfig()
-	if err := json.Unmarshal(data, cfg); err != nil {
+	// Unmarshal into Config struct
+	cfg := &Config{}
+	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	cfg.v = v
 	cfg.configPath = configPath
+
+	// Ensure maps are initialized
+	if cfg.DefaultHeaders == nil {
+		cfg.DefaultHeaders = make(map[string]string)
+	}
+	if cfg.EnvironmentVariables == nil {
+		cfg.EnvironmentVariables = make(map[string]map[string]string)
+	}
+	if cfg.Certificates == nil {
+		cfg.Certificates = make(map[string]CertificateConfig)
+	}
+
+	return cfg, nil
+}
+
+// LoadConfigFromFile loads configuration from a specific file path
+func LoadConfigFromFile(filePath string) (*Config, error) {
+	v := viper.New()
+
+	// Set defaults
+	setDefaults(v)
+
+	v.SetConfigFile(filePath)
+
+	// Allow environment variable overrides
+	v.SetEnvPrefix("RESTCLIENT")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			cfg := DefaultConfig()
+			cfg.v = v
+			cfg.configPath = filePath
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	cfg := &Config{}
+	if err := v.Unmarshal(cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	cfg.v = v
+	cfg.configPath = filePath
+
+	// Ensure maps are initialized
+	if cfg.DefaultHeaders == nil {
+		cfg.DefaultHeaders = make(map[string]string)
+	}
+	if cfg.EnvironmentVariables == nil {
+		cfg.EnvironmentVariables = make(map[string]map[string]string)
+	}
+	if cfg.Certificates == nil {
+		cfg.Certificates = make(map[string]CertificateConfig)
+	}
+
 	return cfg, nil
 }
 
@@ -118,7 +220,7 @@ func (c *Config) Save() error {
 		if err != nil {
 			return fmt.Errorf("failed to get home directory: %w", err)
 		}
-		c.configPath = filepath.Join(homeDir, ".restclient", configFileName)
+		c.configPath = filepath.Join(homeDir, ".restclient", configFileName+"."+configFileType)
 	}
 
 	// Create directory if it doesn't exist
@@ -127,12 +229,26 @@ func (c *Config) Save() error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	data, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
+	// Update viper with current config values
+	if c.v == nil {
+		c.v = viper.New()
 	}
 
-	return os.WriteFile(c.configPath, data, 0644)
+	c.v.Set("followRedirect", c.FollowRedirects)
+	c.v.Set("timeoutInMilliseconds", c.TimeoutMs)
+	c.v.Set("rememberCookiesForSubsequentRequests", c.RememberCookies)
+	c.v.Set("defaultHeaders", c.DefaultHeaders)
+	c.v.Set("environmentVariables", c.EnvironmentVariables)
+	c.v.Set("currentEnvironment", c.CurrentEnvironment)
+	c.v.Set("insecureSSL", c.InsecureSSL)
+	c.v.Set("proxyStrictSSL", c.ProxyStrictSSL)
+	c.v.Set("proxy", c.Proxy)
+	c.v.Set("excludeHostsForProxy", c.ExcludeHostsForProxy)
+	c.v.Set("certificates", c.Certificates)
+	c.v.Set("previewOption", c.PreviewOption)
+	c.v.Set("showColors", c.ShowColors)
+
+	return c.v.WriteConfigAs(c.configPath)
 }
 
 // GetEnvironment returns the environment variables for the current environment
@@ -141,17 +257,13 @@ func (c *Config) GetEnvironment() map[string]string {
 
 	// Copy shared environment first
 	if shared, ok := c.EnvironmentVariables["$shared"]; ok {
-		for k, v := range shared {
-			result[k] = v
-		}
+		maps.Copy(result, shared)
 	}
 
 	// Overlay current environment
 	if c.CurrentEnvironment != "" {
 		if env, ok := c.EnvironmentVariables[c.CurrentEnvironment]; ok {
-			for k, v := range env {
-				result[k] = v
-			}
+			maps.Copy(result, env)
 		}
 	}
 
@@ -239,9 +351,7 @@ func (c *Config) ToClientConfig() *client.ClientConfig {
 		cfg.Timeout = 0 // Will be set from TimeoutMs
 	}
 
-	for k, v := range c.DefaultHeaders {
-		cfg.DefaultHeaders[k] = v
-	}
+	maps.Copy(cfg.DefaultHeaders, c.DefaultHeaders)
 
 	for host, cert := range c.Certificates {
 		cfg.Certificates[host] = client.Certificate{
@@ -265,16 +375,51 @@ func LoadOrCreateConfig() (*Config, error) {
 	return cfg, nil
 }
 
-// ExportToJSON exports the config as JSON string
-func (c *Config) ExportToJSON() (string, error) {
-	data, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+// GetViper returns the underlying viper instance
+func (c *Config) GetViper() *viper.Viper {
+	return c.v
 }
 
-// ImportFromJSON imports config from JSON string
-func (c *Config) ImportFromJSON(jsonStr string) error {
-	return json.Unmarshal([]byte(jsonStr), c)
+// BindFlags binds cobra flags to viper configuration
+func (c *Config) BindFlags(v *viper.Viper) {
+	c.v = v
+}
+
+// ExportToJSON exports the config as JSON string
+func (c *Config) ExportToJSON() (string, error) {
+	// Use viper's AllSettings for a complete export
+	if c.v != nil {
+		settings := c.v.AllSettings()
+		return fmt.Sprintf("%v", settings), nil
+	}
+
+	// Fallback to manual JSON marshaling
+	return "", fmt.Errorf("viper not initialized")
+}
+
+// Reload reloads the configuration from the config file
+func (c *Config) Reload() error {
+	if c.v == nil {
+		return fmt.Errorf("viper not initialized")
+	}
+
+	if err := c.v.ReadInConfig(); err != nil {
+		return fmt.Errorf("failed to reload config: %w", err)
+	}
+
+	return c.v.Unmarshal(c)
+}
+
+// WatchConfig enables live config reloading
+func (c *Config) WatchConfig(onChange func()) {
+	if c.v != nil {
+		c.v.OnConfigChange(func(e fsnotify.Event) {
+			// Reload config on change
+			c.v.Unmarshal(c)
+			if onChange != nil {
+				onChange()
+			}
+		})
+		c.v.WatchConfig()
+	}
 }

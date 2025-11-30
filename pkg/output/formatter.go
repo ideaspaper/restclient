@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/fatih/color"
@@ -83,13 +84,7 @@ func (f *Formatter) FormatHeaders(resp *models.HttpResponse) string {
 	var buf bytes.Buffer
 
 	// Sort headers for consistent output
-	var keys []string
-	for k := range resp.Headers {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(resp.Headers)) {
 		values := resp.Headers[k]
 		for _, v := range values {
 			if f.colorEnabled {

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
 // VariableType represents the type of variable
@@ -335,7 +335,7 @@ func (vp *VariableProcessor) resolveDotenv(args []string) (string, error) {
 		}
 	}
 
-	// Find .env file
+	// Find .env file using Viper
 	dir := vp.currentDir
 	var envFile string
 
@@ -352,14 +352,17 @@ func (vp *VariableProcessor) resolveDotenv(args []string) (string, error) {
 		envFile = filepath.Join(dir, ".env")
 	}
 
-	// Parse the .env file
-	envMap, err := godotenv.Read(envFile)
-	if err != nil {
+	// Use Viper to read the .env file
+	v := viper.New()
+	v.SetConfigFile(envFile)
+	v.SetConfigType("env")
+
+	if err := v.ReadInConfig(); err != nil {
 		return "", fmt.Errorf("dotenv file not found: %w", err)
 	}
 
-	val, ok := envMap[varName]
-	if !ok {
+	val := v.GetString(varName)
+	if val == "" && !v.IsSet(varName) {
 		return "", fmt.Errorf("dotenv variable not found: %s", varName)
 	}
 
