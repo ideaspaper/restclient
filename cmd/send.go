@@ -30,6 +30,7 @@ var (
 	showBody     bool
 	outputFile   string
 	noHistory    bool
+	dryRun       bool
 )
 
 // sendCmd represents the send command
@@ -73,6 +74,7 @@ func init() {
 	sendCmd.Flags().BoolVar(&showBody, "body", false, "only show response body")
 	sendCmd.Flags().StringVarP(&outputFile, "output", "o", "", "save response body to file")
 	sendCmd.Flags().BoolVar(&noHistory, "no-history", false, "don't save request to history")
+	sendCmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview request without sending")
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -159,13 +161,28 @@ func runSend(cmd *cobra.Command, args []string) error {
 	}
 
 	// Process variables in URL, headers, and body
-	request.URL, _ = varProcessor.Process(request.URL)
+	var varErr error
+	request.URL, varErr = varProcessor.Process(request.URL)
+	if varErr != nil {
+		return fmt.Errorf("failed to process variables in URL: %w", varErr)
+	}
 	for k, v := range request.Headers {
-		request.Headers[k], _ = varProcessor.Process(v)
+		request.Headers[k], varErr = varProcessor.Process(v)
+		if varErr != nil {
+			return fmt.Errorf("failed to process variables in header %s: %w", k, varErr)
+		}
 	}
 	if request.RawBody != "" {
-		request.RawBody, _ = varProcessor.Process(request.RawBody)
+		request.RawBody, varErr = varProcessor.Process(request.RawBody)
+		if varErr != nil {
+			return fmt.Errorf("failed to process variables in body: %w", varErr)
+		}
 		request.Body = strings.NewReader(request.RawBody)
+	}
+
+	// Dry run - just print the request without sending
+	if dryRun {
+		return printDryRun(request, cfg)
 	}
 
 	// Send request
@@ -262,6 +279,72 @@ func printRequestInfo(request *models.HttpRequest) {
 		fmt.Println(request.RawBody)
 	}
 	fmt.Println()
+}
+
+func printDryRun(request *models.HttpRequest, cfg *config.Config) error {
+	formatter := output.NewFormatter(!noColor && cfg.ShowColors)
+
+	// Print header
+	fmt.Println(formatter.FormatInfo("=== DRY RUN (request will not be sent) ==="))
+	fmt.Println()
+
+	// Print request line
+	c := color.New(color.FgGreen, color.Bold)
+	if noColor || !cfg.ShowColors {
+		fmt.Printf("%s %s\n", request.Method, request.URL)
+	} else {
+		c.Printf("%s %s\n", request.Method, request.URL)
+	}
+	fmt.Println()
+
+	// Print headers
+	headerColor := color.New(color.FgCyan)
+	fmt.Println("Headers:")
+	for k, v := range request.Headers {
+		if noColor || !cfg.ShowColors {
+			fmt.Printf("  %s: %s\n", k, v)
+		} else {
+			fmt.Printf("  %s: %s\n", headerColor.Sprint(k), v)
+		}
+	}
+
+	// Print default headers that would be added
+	if len(cfg.DefaultHeaders) > 0 {
+		fmt.Println()
+		fmt.Println("Default Headers (from config):")
+		for k, v := range cfg.DefaultHeaders {
+			// Skip if already set in request
+			if _, exists := request.Headers[k]; exists {
+				continue
+			}
+			if noColor || !cfg.ShowColors {
+				fmt.Printf("  %s: %s\n", k, v)
+			} else {
+				fmt.Printf("  %s: %s\n", headerColor.Sprint(k), v)
+			}
+		}
+	}
+
+	// Print body if present
+	if request.RawBody != "" {
+		fmt.Println()
+		fmt.Println("Body:")
+		fmt.Println(request.RawBody)
+	}
+
+	// Print metadata
+	fmt.Println()
+	fmt.Println("Request Settings:")
+	fmt.Printf("  Follow Redirects: %v\n", cfg.FollowRedirects && !request.Metadata.NoRedirect)
+	fmt.Printf("  Use Cookie Jar: %v\n", cfg.RememberCookies && !request.Metadata.NoCookieJar)
+	if cfg.TimeoutMs > 0 {
+		fmt.Printf("  Timeout: %dms\n", cfg.TimeoutMs)
+	}
+	if cfg.Proxy != "" {
+		fmt.Printf("  Proxy: %s\n", cfg.Proxy)
+	}
+
+	return nil
 }
 
 func selectRequest(requests []*models.HttpRequest) (*models.HttpRequest, error) {

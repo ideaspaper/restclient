@@ -533,7 +533,7 @@ func isURLSafe(c byte) bool {
 		(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~'
 }
 
-// extractFromBody extracts a value from body using JSONPath or XPath
+// extractFromBody extracts a value from body using JSONPath
 func extractFromBody(body, path string) (string, error) {
 	// Handle * for full body
 	if path == "*" {
@@ -545,12 +545,7 @@ func extractFromBody(body, path string) (string, error) {
 		return extractJSONPath(body, path)
 	}
 
-	// XPath (starts with /)
-	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
-		return extractXPath(body, path)
-	}
-
-	return "", fmt.Errorf("unsupported path format: %s", path)
+	return "", fmt.Errorf("unsupported path format: %s (only JSONPath with $. or $[ prefix is supported)", path)
 }
 
 // extractJSONPath extracts a value using JSONPath
@@ -695,15 +690,6 @@ func extractJSONArrayElement(json string, index int) string {
 	}
 
 	return ""
-}
-
-// extractXPath extracts a value using XPath (simplified implementation)
-func extractXPath(body, path string) (string, error) {
-	// This is a simplified XPath implementation
-	// A full implementation would use an XML parsing library
-
-	// For now, just return an error indicating XPath is not fully supported
-	return "", fmt.Errorf("XPath extraction not fully implemented: %s", path)
 }
 
 // ParseFileVariables parses file variables from content

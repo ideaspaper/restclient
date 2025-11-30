@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"os"
@@ -391,7 +392,11 @@ func (c *Config) ExportToJSON() (string, error) {
 	// Use viper's AllSettings for a complete export
 	if c.v != nil {
 		settings := c.v.AllSettings()
-		return fmt.Sprintf("%v", settings), nil
+		jsonBytes, err := json.MarshalIndent(settings, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal config to JSON: %w", err)
+		}
+		return string(jsonBytes), nil
 	}
 
 	// Fallback to manual JSON marshaling
