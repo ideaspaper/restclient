@@ -3,6 +3,7 @@ package variables
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -548,26 +549,55 @@ func extractFromBody(body, path string) (string, error) {
 	return "", fmt.Errorf("unsupported path format: %s (only JSONPath with $. or $[ prefix is supported)", path)
 }
 
-// extractJSONPath extracts a value using JSONPath
+// extractJSONPath extracts a value using JSONPath with proper JSON parsing
 func extractJSONPath(body, path string) (string, error) {
-	// Simple JSONPath implementation for common cases
-	// Full implementation would use a JSONPath library
+	// Parse JSON into a generic structure
+	var data any
+	if err := json.Unmarshal([]byte(body), &data); err != nil {
+		return "", fmt.Errorf("invalid JSON: %w", err)
+	}
 
-	// Remove $. prefix
+	// Remove $ prefix and split path
 	path = strings.TrimPrefix(path, "$.")
-	parts := strings.Split(path, ".")
+	path = strings.TrimPrefix(path, "$")
 
-	// Parse JSON manually for simple cases
-	current := body
+	// Handle empty path (just "$")
+	if path == "" {
+		return valueToString(data)
+	}
+
+	// Parse and navigate the path
+	current := data
+	parts := splitJSONPath(path)
+
 	for _, part := range parts {
-		// Handle array index
-		if strings.Contains(part, "[") {
-			name := part[:strings.Index(part, "[")]
-			indexStr := part[strings.Index(part, "[")+1 : strings.Index(part, "]")]
+		if part == "" {
+			continue
+		}
 
-			current = extractJSONField(current, name)
-			if current == "" {
-				return "", fmt.Errorf("field '%s' not found", name)
+		// Handle array index like "[0]" or "items[0]"
+		if strings.Contains(part, "[") {
+			bracketIdx := strings.Index(part, "[")
+			fieldName := part[:bracketIdx]
+			indexStr := part[bracketIdx+1 : strings.Index(part, "]")]
+
+			// Navigate to field first if there's a field name
+			if fieldName != "" {
+				obj, ok := current.(map[string]any)
+				if !ok {
+					return "", fmt.Errorf("expected object at '%s', got %T", fieldName, current)
+				}
+				val, exists := obj[fieldName]
+				if !exists {
+					return "", fmt.Errorf("field '%s' not found", fieldName)
+				}
+				current = val
+			}
+
+			// Now get array element
+			arr, ok := current.([]any)
+			if !ok {
+				return "", fmt.Errorf("expected array, got %T", current)
 			}
 
 			index, err := strconv.Atoi(indexStr)
@@ -575,121 +605,88 @@ func extractJSONPath(body, path string) (string, error) {
 				return "", fmt.Errorf("invalid array index: %s", indexStr)
 			}
 
-			current = extractJSONArrayElement(current, index)
+			if index < 0 || index >= len(arr) {
+				return "", fmt.Errorf("array index out of bounds: %d (length %d)", index, len(arr))
+			}
+
+			current = arr[index]
 		} else {
-			current = extractJSONField(current, part)
-		}
+			// Regular field access
+			obj, ok := current.(map[string]any)
+			if !ok {
+				return "", fmt.Errorf("expected object at '%s', got %T", part, current)
+			}
 
-		if current == "" {
-			return "", fmt.Errorf("path not found: %s", path)
+			val, exists := obj[part]
+			if !exists {
+				return "", fmt.Errorf("field '%s' not found", part)
+			}
+			current = val
 		}
 	}
 
-	// Remove quotes from string values
-	current = strings.Trim(current, "\"")
-	return current, nil
+	return valueToString(current)
 }
 
-// extractJSONField extracts a field from JSON
-func extractJSONField(json, field string) string {
-	// Find "field": or "field" :
-	pattern := fmt.Sprintf(`"%s"\s*:\s*`, regexp.QuoteMeta(field))
-	re := regexp.MustCompile(pattern)
-	loc := re.FindStringIndex(json)
-	if loc == nil {
-		return ""
+// splitJSONPath splits a JSONPath into parts, handling array indices correctly
+func splitJSONPath(path string) []string {
+	var parts []string
+	var current strings.Builder
+
+	for i := 0; i < len(path); i++ {
+		c := path[i]
+		if c == '.' {
+			if current.Len() > 0 {
+				parts = append(parts, current.String())
+				current.Reset()
+			}
+		} else if c == '[' {
+			// Include array index with the field name
+			current.WriteByte(c)
+			// Read until closing bracket
+			for i++; i < len(path) && path[i] != ']'; i++ {
+				current.WriteByte(path[i])
+			}
+			if i < len(path) {
+				current.WriteByte(']')
+			}
+		} else {
+			current.WriteByte(c)
+		}
 	}
 
-	start := loc[1]
-	return extractJSONValue(json[start:])
+	if current.Len() > 0 {
+		parts = append(parts, current.String())
+	}
+
+	return parts
 }
 
-// extractJSONValue extracts a JSON value starting at the current position
-func extractJSONValue(json string) string {
-	json = strings.TrimSpace(json)
-	if len(json) == 0 {
-		return ""
-	}
-
-	switch json[0] {
-	case '"':
-		// String value
-		end := 1
-		for end < len(json) {
-			if json[end] == '"' && json[end-1] != '\\' {
-				return json[:end+1]
-			}
-			end++
+// valueToString converts a JSON value to its string representation
+func valueToString(v any) (string, error) {
+	switch val := v.(type) {
+	case string:
+		return val, nil
+	case float64:
+		// Check if it's an integer
+		if val == float64(int64(val)) {
+			return strconv.FormatInt(int64(val), 10), nil
 		}
-	case '{':
-		// Object
-		depth := 1
-		end := 1
-		for end < len(json) && depth > 0 {
-			if json[end] == '{' {
-				depth++
-			} else if json[end] == '}' {
-				depth--
-			}
-			end++
+		return strconv.FormatFloat(val, 'f', -1, 64), nil
+	case bool:
+		return strconv.FormatBool(val), nil
+	case nil:
+		return "null", nil
+	case map[string]any, []any:
+		// For objects and arrays, return JSON representation
+		bytes, err := json.Marshal(val)
+		if err != nil {
+			return "", err
 		}
-		return json[:end]
-	case '[':
-		// Array
-		depth := 1
-		end := 1
-		for end < len(json) && depth > 0 {
-			if json[end] == '[' {
-				depth++
-			} else if json[end] == ']' {
-				depth--
-			}
-			end++
-		}
-		return json[:end]
+		return string(bytes), nil
 	default:
-		// Number, boolean, null
-		end := 0
-		for end < len(json) && json[end] != ',' && json[end] != '}' && json[end] != ']' && json[end] != ' ' && json[end] != '\n' {
-			end++
-		}
-		return json[:end]
+		return fmt.Sprintf("%v", val), nil
 	}
-
-	return ""
-}
-
-// extractJSONArrayElement extracts an element from a JSON array
-func extractJSONArrayElement(json string, index int) string {
-	json = strings.TrimSpace(json)
-	if len(json) < 2 || json[0] != '[' {
-		return ""
-	}
-
-	// Skip opening bracket
-	json = json[1:]
-	currentIndex := 0
-
-	for len(json) > 0 && json[0] != ']' {
-		json = strings.TrimSpace(json)
-		value := extractJSONValue(json)
-		if value == "" {
-			return ""
-		}
-
-		if currentIndex == index {
-			return value
-		}
-
-		json = json[len(value):]
-		json = strings.TrimSpace(json)
-		if len(json) > 0 && json[0] == ',' {
-			json = json[1:]
-		}
-		currentIndex++
-	}
-
-	return ""
 }
 
 // ParseFileVariables parses file variables from content

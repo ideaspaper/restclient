@@ -12,8 +12,8 @@ A powerful command-line HTTP client inspired by the [VS Code REST Client](https:
 - Multipart form data and file uploads
 - GraphQL support (queries, mutations, subscriptions)
 - Basic, Digest, and AWS Signature v4 authentication
-- Cookie jar with persistence
-- Colored output with syntax highlighting
+- Cookie jar for subsequent requests within a session
+- Colored output with syntax highlighting for JSON and XML
 - Shell completion for bash, zsh, fish, and PowerShell
 
 ## Installation
@@ -105,6 +105,7 @@ restclient send <file.http> [flags]
 | `--body` | | Only show response body |
 | `--output` | `-o` | Save response body to file |
 | `--no-history` | | Don't save request to history |
+| `--dry-run` | | Preview request without sending |
 
 **Examples:**
 
@@ -123,6 +124,9 @@ restclient send api.http --output response.json
 
 # Only show response body
 restclient send api.http --body
+
+# Preview request without sending (dry run)
+restclient send api.http --dry-run
 ```
 
 ### env
@@ -182,11 +186,20 @@ restclient history <subcommand> [args]
 | `stats` | Show history statistics |
 | `clear` | Clear all history |
 
+**Flags for `list`:**
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--limit` | `-l` | Number of items to show (default: 10) |
+| `--all` | `-a` | Show all history items |
+
 **Examples:**
 
 ```bash
 # List last 10 requests
 restclient history list
+
+# List last 5 requests
+restclient history list --limit 5
 
 # List all requests
 restclient history list --all
@@ -223,6 +236,29 @@ restclient completion fish > ~/.config/fish/completions/restclient.fish
 
 # PowerShell
 restclient completion powershell | Out-String | Invoke-Expression
+```
+
+### update
+
+Update restclient to the latest or a specific version.
+
+```bash
+restclient update [flags]
+```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--version` | Version to install (default: "latest") |
+
+**Examples:**
+
+```bash
+# Update to the latest version
+restclient update
+
+# Update to a specific version
+restclient update --version v1.0.0
 ```
 
 ## HTTP File Format

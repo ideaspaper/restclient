@@ -3,7 +3,9 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -289,11 +291,39 @@ func (f *Formatter) colorizeJSON(jsonStr string) string {
 	return result.String()
 }
 
-// formatXML formats XML with basic indentation
+// formatXML formats XML with proper indentation
 func (f *Formatter) formatXML(body string) string {
-	// Simple XML formatting - just return as-is for now
-	// A proper implementation would use an XML parser
-	return body
+	// Decode and re-encode with indentation
+	decoder := xml.NewDecoder(strings.NewReader(body))
+	var buf bytes.Buffer
+	encoder := xml.NewEncoder(&buf)
+	encoder.Indent("", "  ")
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			// Return original body on parse error
+			return body
+		}
+
+		if err := encoder.EncodeToken(token); err != nil {
+			return body
+		}
+	}
+
+	if err := encoder.Flush(); err != nil {
+		return body
+	}
+
+	result := buf.String()
+	if result == "" {
+		return body
+	}
+
+	return result
 }
 
 // getStatusText returns the text description for an HTTP status code

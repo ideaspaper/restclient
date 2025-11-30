@@ -130,9 +130,10 @@ func TestFormatBody_XML(t *testing.T) {
 
 	formatted := f.FormatBody(resp)
 
-	// Currently returns as-is (no XML formatting implemented)
-	if formatted != `<root><item>test</item></root>` {
-		t.Error("XML should be returned as-is")
+	// Should be pretty-printed with indentation
+	expected := "<root>\n  <item>test</item>\n</root>"
+	if formatted != expected {
+		t.Errorf("XML should be formatted with indentation, got: %q, want: %q", formatted, expected)
 	}
 }
 

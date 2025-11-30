@@ -469,7 +469,7 @@ func TestExtractJSONPath(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{name: "simple field", path: "$.user", want: `{"name": "John", "age": 30}`},
+		{name: "simple field", path: "$.user", want: `{"age":30,"name":"John"}`},
 		{name: "nested field", path: "$.user.name", want: "John"},
 		{name: "number field", path: "$.user.age", want: "30"},
 		{name: "boolean field", path: "$.active", want: "true"},
