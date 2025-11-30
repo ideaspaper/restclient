@@ -21,7 +21,7 @@ A powerful command-line HTTP client inspired by the [VS Code REST Client](https:
 ### Using `go install`
 
 ```bash
-go install github.com/ideaspaper/rest-client@latest
+go install github.com/ideaspaper/restclient@latest
 ```
 
 This will install the binary as `rest-client` in your `$GOPATH/bin` directory. Make sure `$GOPATH/bin` is in your `PATH`.
@@ -30,7 +30,7 @@ This will install the binary as `rest-client` in your `$GOPATH/bin` directory. M
 
 ```bash
 # Clone the repository
-git clone https://github.com/ideaspaper/rest-client.git
+git clone https://github.com/ideaspaper/restclient.git
 cd rest-client
 
 # Build the binary

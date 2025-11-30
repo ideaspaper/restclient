@@ -8,11 +8,11 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/ideaspaper/rest-client/pkg/config"
-	"github.com/ideaspaper/rest-client/pkg/history"
-	"github.com/ideaspaper/rest-client/pkg/models"
-	"github.com/ideaspaper/rest-client/pkg/output"
-	"github.com/ideaspaper/rest-client/pkg/variables"
+	"github.com/ideaspaper/restclient/pkg/config"
+	"github.com/ideaspaper/restclient/pkg/history"
+	"github.com/ideaspaper/restclient/pkg/models"
+	"github.com/ideaspaper/restclient/pkg/output"
+	"github.com/ideaspaper/restclient/pkg/variables"
 )
 
 var (

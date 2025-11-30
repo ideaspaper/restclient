@@ -1,4 +1,4 @@
-module github.com/ideaspaper/rest-client
+module github.com/ideaspaper/restclient
 
 go 1.24.0
 

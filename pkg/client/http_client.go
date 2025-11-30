@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ideaspaper/rest-client/pkg/models"
+	"github.com/ideaspaper/restclient/pkg/models"
 )
 
 // ClientConfig holds client configuration

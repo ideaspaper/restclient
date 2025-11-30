@@ -10,7 +10,7 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/ideaspaper/rest-client/pkg/models"
+	"github.com/ideaspaper/restclient/pkg/models"
 )
 
 // Formatter handles response formatting and colorization

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ideaspaper/rest-client/pkg/models"
+	"github.com/ideaspaper/restclient/pkg/models"
 )
 
 func TestDefaultConfig(t *testing.T) {

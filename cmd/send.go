@@ -13,13 +13,13 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/ideaspaper/rest-client/pkg/client"
-	"github.com/ideaspaper/rest-client/pkg/config"
-	"github.com/ideaspaper/rest-client/pkg/history"
-	"github.com/ideaspaper/rest-client/pkg/models"
-	"github.com/ideaspaper/rest-client/pkg/output"
-	"github.com/ideaspaper/rest-client/pkg/parser"
-	"github.com/ideaspaper/rest-client/pkg/variables"
+	"github.com/ideaspaper/restclient/pkg/client"
+	"github.com/ideaspaper/restclient/pkg/config"
+	"github.com/ideaspaper/restclient/pkg/history"
+	"github.com/ideaspaper/restclient/pkg/models"
+	"github.com/ideaspaper/restclient/pkg/output"
+	"github.com/ideaspaper/restclient/pkg/parser"
+	"github.com/ideaspaper/restclient/pkg/variables"
 )
 
 var (

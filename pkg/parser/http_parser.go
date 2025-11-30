@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ideaspaper/rest-client/pkg/models"
+	"github.com/ideaspaper/restclient/pkg/models"
 )
 
 // ParseState represents the current state of parsing

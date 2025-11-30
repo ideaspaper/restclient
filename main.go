@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/ideaspaper/rest-client/cmd"
+	"github.com/ideaspaper/restclient/cmd"
 )
 
 func main() {
