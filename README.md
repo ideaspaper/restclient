@@ -24,14 +24,14 @@ A powerful command-line HTTP client inspired by the [VS Code REST Client](https:
 go install github.com/ideaspaper/restclient@latest
 ```
 
-This will install the binary as `rest-client` in your `$GOPATH/bin` directory. Make sure `$GOPATH/bin` is in your `PATH`.
+This will install the binary as `restclient` in your `$GOPATH/bin` directory. Make sure `$GOPATH/bin` is in your `PATH`.
 
 ### From Source
 
 ```bash
 # Clone the repository
 git clone https://github.com/ideaspaper/restclient.git
-cd rest-client
+cd restclient
 
 # Build the binary
 go build -o restclient .
