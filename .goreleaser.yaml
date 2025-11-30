@@ -1,0 +1,57 @@
+version: 2
+
+project_name: restclient
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - binary: restclient
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/ideaspaper/restclient/cmd.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+
+brews:
+  - repository:
+      owner: ideaspaper
+      name: homebrew-tap
+    homepage: "https://github.com/ideaspaper/restclient"
+    description: "A powerful command-line HTTP client for .http and .rest files"
+    license: "MIT"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    install: |
+      bin.install "restclient"
+    test: |
+      system "#{bin}/restclient", "--version"
