@@ -54,7 +54,7 @@ func DefaultConfig() *ClientConfig {
 	return &ClientConfig{
 		Timeout:         0, // No timeout
 		FollowRedirects: true,
-		InsecureSSL:     true,
+		InsecureSSL:     false,
 		RememberCookies: true,
 		DefaultHeaders: map[string]string{
 			"User-Agent": "restclient-cli",
@@ -65,9 +65,10 @@ func DefaultConfig() *ClientConfig {
 
 // HttpClient is an HTTP client with auth support
 type HttpClient struct {
-	config    *ClientConfig
-	client    *http.Client
-	cookieJar *cookiejar.Jar
+	config      *ClientConfig
+	client      *http.Client
+	cookieJar   *cookiejar.Jar
+	digestCreds map[string]digestCredentials
 }
 
 // NewHttpClient creates a new HTTP client
@@ -128,9 +129,10 @@ func NewHttpClient(config *ClientConfig) (*HttpClient, error) {
 	}
 
 	return &HttpClient{
-		config:    config,
-		client:    client,
-		cookieJar: jar,
+		config:      config,
+		client:      client,
+		cookieJar:   jar,
+		digestCreds: make(map[string]digestCredentials),
 	}, nil
 }
 
@@ -311,15 +313,13 @@ type digestCredentials struct {
 	password string
 }
 
-var storedDigestCreds = make(map[string]digestCredentials)
-
 // storeDigestCredentials stores digest credentials for later use
 func (c *HttpClient) storeDigestCredentials(request *models.HttpRequest, args []string) error {
 	if len(args) < 2 {
 		return nil
 	}
 
-	storedDigestCreds[request.URL] = digestCredentials{
+	c.digestCreds[request.URL] = digestCredentials{
 		username: args[0],
 		password: strings.Join(args[1:], " "),
 	}
@@ -331,7 +331,7 @@ func (c *HttpClient) storeDigestCredentials(request *models.HttpRequest, args []
 
 // handleDigestAuth handles Digest authentication challenge
 func (c *HttpClient) handleDigestAuth(ctx context.Context, request *models.HttpRequest, resp *http.Response, authHeader string) (*http.Response, error) {
-	creds, ok := storedDigestCreds[request.URL]
+	creds, ok := c.digestCreds[request.URL]
 	if !ok {
 		return resp, nil
 	}

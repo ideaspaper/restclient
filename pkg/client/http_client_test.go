@@ -24,8 +24,8 @@ func TestDefaultConfig(t *testing.T) {
 	if !config.FollowRedirects {
 		t.Error("FollowRedirects should be true by default")
 	}
-	if !config.InsecureSSL {
-		t.Error("InsecureSSL should be true by default")
+	if config.InsecureSSL {
+		t.Error("InsecureSSL should be false by default for security")
 	}
 	if !config.RememberCookies {
 		t.Error("RememberCookies should be true by default")

@@ -24,13 +24,12 @@ import (
 
 var (
 	// Send command flags
-	requestName    string
-	requestIndex   int
-	showHeaders    bool
-	showBody       bool
-	outputFile     string
-	noHistory      bool
-	followRedirect *bool
+	requestName  string
+	requestIndex int
+	showHeaders  bool
+	showBody     bool
+	outputFile   string
+	noHistory    bool
 )
 
 // sendCmd represents the send command

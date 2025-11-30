@@ -286,15 +286,12 @@ func (vp *VariableProcessor) resolveRandomInt(args []string) (string, error) {
 		return "", fmt.Errorf("min must be less than max")
 	}
 
-	// Generate random number
-	rangeSize := max - min
+	// Generate random number using uint32 to avoid overflow issues
+	rangeSize := uint32(max - min)
 	randomBytes := make([]byte, 4)
 	rand.Read(randomBytes)
-	randomNum := int(randomBytes[0])<<24 | int(randomBytes[1])<<16 | int(randomBytes[2])<<8 | int(randomBytes[3])
-	if randomNum < 0 {
-		randomNum = -randomNum
-	}
-	result := (randomNum % rangeSize) + min
+	randomNum := uint32(randomBytes[0])<<24 | uint32(randomBytes[1])<<16 | uint32(randomBytes[2])<<8 | uint32(randomBytes[3])
+	result := int(randomNum%rangeSize) + min
 
 	return strconv.Itoa(result), nil
 }

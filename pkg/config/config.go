@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
@@ -348,7 +349,7 @@ func (c *Config) ToClientConfig() *client.ClientConfig {
 	cfg.ExcludeProxy = c.ExcludeHostsForProxy
 
 	if c.TimeoutMs > 0 {
-		cfg.Timeout = 0 // Will be set from TimeoutMs
+		cfg.Timeout = time.Duration(c.TimeoutMs) * time.Millisecond
 	}
 
 	maps.Copy(cfg.DefaultHeaders, c.DefaultHeaders)

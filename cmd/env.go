@@ -350,7 +350,7 @@ func printVariables(vars map[string]string, useColor bool) {
 
 	for _, name := range names {
 		value := vars[name]
-		displayValue := maskValue(value)
+		displayValue := maskValueByName(name, value)
 
 		if useColor {
 			fmt.Printf("  %s = %s\n", nameColor.Sprint(name), valueColor.Sprint(displayValue))
@@ -361,24 +361,30 @@ func printVariables(vars map[string]string, useColor bool) {
 }
 
 func maskValue(value string) string {
-	// Mask sensitive values
-	lowerValue := strings.ToLower(value)
-	if strings.Contains(lowerValue, "password") ||
-		strings.Contains(lowerValue, "secret") ||
-		strings.Contains(lowerValue, "token") ||
-		strings.Contains(lowerValue, "key") ||
-		strings.Contains(lowerValue, "api_key") ||
-		strings.Contains(lowerValue, "apikey") {
-		if len(value) > 4 {
-			return value[:4] + strings.Repeat("*", len(value)-4)
-		}
-		return strings.Repeat("*", len(value))
-	}
-
 	// Truncate long values
 	if len(value) > 50 {
 		return value[:47] + "..."
 	}
 
 	return value
+}
+
+// maskValueByName masks the value if the variable name suggests it's sensitive
+func maskValueByName(name, value string) string {
+	lowerName := strings.ToLower(name)
+	if strings.Contains(lowerName, "password") ||
+		strings.Contains(lowerName, "secret") ||
+		strings.Contains(lowerName, "token") ||
+		strings.Contains(lowerName, "key") ||
+		strings.Contains(lowerName, "api_key") ||
+		strings.Contains(lowerName, "apikey") ||
+		strings.Contains(lowerName, "credential") ||
+		strings.Contains(lowerName, "auth") {
+		if len(value) > 4 {
+			return value[:4] + strings.Repeat("*", len(value)-4)
+		}
+		return strings.Repeat("*", len(value))
+	}
+
+	return maskValue(value)
 }
