@@ -107,6 +107,7 @@ restclient send <file.http> [flags]
 | `--no-history` | | Don't save request to history |
 
 **Examples:**
+
 ```bash
 # Send first request in file
 restclient send api.http
@@ -145,6 +146,7 @@ restclient env <subcommand> [args]
 | `delete <env>` | Delete an environment |
 
 **Examples:**
+
 ```bash
 # Create environments
 restclient env create development
@@ -181,6 +183,7 @@ restclient history <subcommand> [args]
 | `clear` | Clear all history |
 
 **Examples:**
+
 ```bash
 # List last 10 requests
 restclient history list
@@ -207,6 +210,7 @@ restclient completion [bash|zsh|fish|powershell]
 ```
 
 **Setup:**
+
 ```bash
 # Bash
 source <(restclient completion bash)
@@ -284,13 +288,13 @@ Use comments with `@` prefix for metadata:
 GET https://api.example.com/users
 ```
 
-| Metadata | Description |
-|----------|-------------|
-| `@name` | Name the request for reference |
-| `@note` | Add a description |
-| `@no-redirect` | Don't follow redirects |
-| `@no-cookie-jar` | Don't use cookie jar |
-| `@prompt` | Define prompt variables |
+| Metadata         | Description                    |
+| ---------------- | ------------------------------ |
+| `@name`          | Name the request for reference |
+| `@note`          | Add a description              |
+| `@no-redirect`   | Don't follow redirects         |
+| `@no-cookie-jar` | Don't use cookie jar           |
+| `@prompt`        | Define prompt variables        |
 
 ### Query Parameters
 
@@ -404,26 +408,28 @@ Authorization: Bearer {{API_KEY}}
 
 ### System Variables
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `{{$guid}}` | UUID v4 | `550e8400-e29b-41d4-a716-446655440000` |
-| `{{$timestamp}}` | Unix timestamp | `1234567890` |
-| `{{$timestamp offset unit}}` | Timestamp with offset | `{{$timestamp -1 d}}` |
-| `{{$datetime format}}` | Formatted datetime | `{{$datetime iso8601}}` |
-| `{{$datetime format offset unit}}` | Datetime with offset | `{{$datetime rfc1123 1 h}}` |
-| `{{$localDatetime format}}` | Local datetime | `{{$localDatetime YYYY-MM-DD}}` |
-| `{{$randomInt min max}}` | Random integer | `{{$randomInt 1 100}}` |
-| `{{$processEnv VAR}}` | OS environment variable | `{{$processEnv HOME}}` |
-| `{{$dotenv VAR}}` | Variable from `.env` file | `{{$dotenv DATABASE_URL}}` |
-| `{{$prompt name}}` | Prompt for input | `{{$prompt username}}` |
-| `{{$prompt name description}}` | Prompt with description | `{{$prompt apiKey Enter your API key}}` |
+| Variable                           | Description               | Example                                 |
+| ---------------------------------- | ------------------------- | --------------------------------------- |
+| `{{$guid}}`                        | UUID v4                   | `550e8400-e29b-41d4-a716-446655440000`  |
+| `{{$timestamp}}`                   | Unix timestamp            | `1234567890`                            |
+| `{{$timestamp offset unit}}`       | Timestamp with offset     | `{{$timestamp -1 d}}`                   |
+| `{{$datetime format}}`             | Formatted datetime        | `{{$datetime iso8601}}`                 |
+| `{{$datetime format offset unit}}` | Datetime with offset      | `{{$datetime rfc1123 1 h}}`             |
+| `{{$localDatetime format}}`        | Local datetime            | `{{$localDatetime YYYY-MM-DD}}`         |
+| `{{$randomInt min max}}`           | Random integer            | `{{$randomInt 1 100}}`                  |
+| `{{$processEnv VAR}}`              | OS environment variable   | `{{$processEnv HOME}}`                  |
+| `{{$dotenv VAR}}`                  | Variable from `.env` file | `{{$dotenv DATABASE_URL}}`              |
+| `{{$prompt name}}`                 | Prompt for input          | `{{$prompt username}}`                  |
+| `{{$prompt name description}}`     | Prompt with description   | `{{$prompt apiKey Enter your API key}}` |
 
 **Datetime Formats:**
+
 - `iso8601` - ISO 8601 format (RFC3339)
 - `rfc1123` - RFC 1123 format
 - Custom: `YYYY-MM-DD`, `HH:mm:ss`, `YYYY-MM-DDTHH:mm:ssZ`, etc.
 
 **Offset Units:**
+
 - `y` - years
 - `M` - months
 - `w` - weeks
@@ -434,6 +440,7 @@ Authorization: Bearer {{API_KEY}}
 - `ms` - milliseconds
 
 **Examples:**
+
 ```http
 @requestId = {{$guid}}
 
@@ -469,6 +476,7 @@ Authorization: Bearer {{login.response.body.$.token}}
 ```
 
 **Syntax:**
+
 - `{{requestName.response.body.$.jsonPath}}` - Extract from JSON response
 - `{{requestName.response.headers.Header-Name}}` - Extract response header
 
@@ -552,27 +560,27 @@ Configuration is stored in `~/.restclient/config.json`:
 
 ### Configuration Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `followRedirect` | Follow HTTP redirects | `true` |
-| `timeoutInMilliseconds` | Request timeout (0 = no timeout) | `0` |
-| `rememberCookiesForSubsequentRequests` | Persist cookies between requests | `true` |
-| `defaultHeaders` | Headers added to all requests | `{"User-Agent": "restclient-cli"}` |
-| `insecureSSL` | Skip SSL certificate verification | `false` |
-| `proxy` | HTTP proxy URL | `""` |
-| `excludeHostsForProxy` | Hosts to bypass proxy | `[]` |
-| `showColors` | Colorized output | `true` |
+| Option                                 | Description                       | Default                            |
+| -------------------------------------- | --------------------------------- | ---------------------------------- |
+| `followRedirect`                       | Follow HTTP redirects             | `true`                             |
+| `timeoutInMilliseconds`                | Request timeout (0 = no timeout)  | `0`                                |
+| `rememberCookiesForSubsequentRequests` | Persist cookies between requests  | `true`                             |
+| `defaultHeaders`                       | Headers added to all requests     | `{"User-Agent": "restclient-cli"}` |
+| `insecureSSL`                          | Skip SSL certificate verification | `false`                            |
+| `proxy`                                | HTTP proxy URL                    | `""`                               |
+| `excludeHostsForProxy`                 | Hosts to bypass proxy             | `[]`                               |
+| `showColors`                           | Colorized output                  | `true`                             |
 
 ## Global Flags
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--config` | `-c` | Config file path |
-| `--env` | `-e` | Environment to use |
-| `--verbose` | `-v` | Verbose output |
-| `--no-color` | | Disable colored output |
-| `--version` | | Show version |
-| `--help` | `-h` | Show help |
+| Flag         | Short | Description            |
+| ------------ | ----- | ---------------------- |
+| `--config`   | `-c`  | Config file path       |
+| `--env`      | `-e`  | Environment to use     |
+| `--verbose`  | `-v`  | Verbose output         |
+| `--no-color` |       | Disable colored output |
+| `--version`  |       | Show version           |
+| `--help`     | `-h`  | Show help              |
 
 ## Examples
 
@@ -601,7 +609,7 @@ GET {{baseUrl}}/users/{{userId}}
 X-API-Key: {{apiKey}}
 
 ### Update user
-# @name updateUser  
+# @name updateUser
 PUT {{baseUrl}}/users/{{userId}}
 Content-Type: application/json
 X-API-Key: {{apiKey}}
@@ -662,6 +670,7 @@ Error: request with name 'myRequest' not found
 ```
 
 Make sure the request has the `@name` metadata:
+
 ```http
 # @name myRequest
 GET https://api.example.com
@@ -682,12 +691,14 @@ GET https://api.example.com
 For self-signed certificates, you can either:
 
 1. Set `insecureSSL` in config:
+
 ```bash
 # Edit ~/.restclient/config.json
 # Set "insecureSSL": true
 ```
 
 2. Configure certificates:
+
 ```json
 {
   "certificates": {
@@ -702,6 +713,7 @@ For self-signed certificates, you can either:
 ### Proxy Issues
 
 Configure proxy in `~/.restclient/config.json`:
+
 ```json
 {
   "proxy": "http://proxy.example.com:8080",
