@@ -36,9 +36,9 @@ clean:
 release-snapshot:
 	goreleaser release --snapshot --clean
 
-# Create a new release (requires GITHUB_TOKEN)
+# Create a new release (requires GITHUB_TOKEN in .env)
 release:
-	goreleaser release --clean
+	set -a && source .env && set +a && goreleaser release --clean
 
 # Create a new tag and release
 # Usage: make release-tag VERSION=v1.0.0
@@ -46,4 +46,4 @@ release-tag:
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make release-tag VERSION=v1.0.0"; exit 1; fi
 	git tag -a $(VERSION) -m "Release $(VERSION)"
 	git push origin $(VERSION)
-	goreleaser release --clean
+	set -a && source .env && set +a && goreleaser release --clean
