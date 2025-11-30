@@ -1,0 +1,210 @@
+### JSONPlaceholder API Examples
+### https://jsonplaceholder.typicode.com
+
+@baseUrl = https://jsonplaceholder.typicode.com
+
+###############################################################################
+# POSTS
+###############################################################################
+
+### Get all posts
+# @name getAllPosts
+GET {{baseUrl}}/posts
+Accept: application/json
+
+### Get a single post
+# @name getPost
+GET {{baseUrl}}/posts/1
+Accept: application/json
+
+### Create a new post
+# @name createPost
+POST {{baseUrl}}/posts
+Content-Type: application/json
+
+{
+    "title": "My New Post",
+    "body": "This is the content of my new post created at {{$datetime iso8601}}",
+    "userId": 1
+}
+
+### Update a post (PUT - full replacement)
+# @name updatePost
+PUT {{baseUrl}}/posts/1
+Content-Type: application/json
+
+{
+    "id": 1,
+    "title": "Updated Post Title",
+    "body": "This post has been fully updated",
+    "userId": 1
+}
+
+### Partial update a post (PATCH)
+# @name patchPost
+PATCH {{baseUrl}}/posts/1
+Content-Type: application/json
+
+{
+    "title": "Patched Title Only"
+}
+
+### Delete a post
+# @name deletePost
+DELETE {{baseUrl}}/posts/1
+
+### Get posts by user (query parameter)
+# @name getPostsByUser
+GET {{baseUrl}}/posts
+    ?userId=1
+Accept: application/json
+
+###############################################################################
+# COMMENTS
+###############################################################################
+
+### Get all comments for a post
+# @name getComments
+GET {{baseUrl}}/posts/1/comments
+Accept: application/json
+
+### Get comments using query parameter
+# @name getCommentsByPost
+GET {{baseUrl}}/comments?postId=1
+Accept: application/json
+
+### Create a comment
+# @name createComment
+POST {{baseUrl}}/comments
+Content-Type: application/json
+
+{
+    "postId": 1,
+    "name": "My Comment",
+    "email": "user@example.com",
+    "body": "This is a great post! Comment ID: {{$guid}}"
+}
+
+###############################################################################
+# USERS
+###############################################################################
+
+### Get all users
+# @name getAllUsers
+GET {{baseUrl}}/users
+Accept: application/json
+
+### Get a single user
+# @name getUser
+GET {{baseUrl}}/users/1
+Accept: application/json
+
+### Create a new user
+# @name createUser
+POST {{baseUrl}}/users
+Content-Type: application/json
+
+{
+    "name": "John Doe",
+    "username": "johndoe_{{$randomInt 1000 9999}}",
+    "email": "john.doe@example.com",
+    "address": {
+        "street": "123 Main St",
+        "suite": "Apt 4",
+        "city": "New York",
+        "zipcode": "10001",
+        "geo": {
+            "lat": "40.7128",
+            "lng": "-74.0060"
+        }
+    },
+    "phone": "1-234-567-8900",
+    "website": "johndoe.com",
+    "company": {
+        "name": "Doe Industries",
+        "catchPhrase": "Innovation at its finest",
+        "bs": "synergize scalable solutions"
+    }
+}
+
+###############################################################################
+# TODOS
+###############################################################################
+
+### Get all todos
+# @name getAllTodos
+GET {{baseUrl}}/todos
+Accept: application/json
+
+### Get todos for a specific user
+# @name getTodosByUser
+GET {{baseUrl}}/todos?userId=1
+Accept: application/json
+
+### Get a single todo
+# @name getTodo
+GET {{baseUrl}}/todos/1
+Accept: application/json
+
+### Create a todo
+# @name createTodo
+POST {{baseUrl}}/todos
+Content-Type: application/json
+
+{
+    "userId": 1,
+    "title": "Learn to use rest-client CLI - {{$datetime iso8601}}",
+    "completed": false
+}
+
+### Mark todo as completed
+# @name completeTodo
+PATCH {{baseUrl}}/todos/1
+Content-Type: application/json
+
+{
+    "completed": true
+}
+
+###############################################################################
+# ALBUMS & PHOTOS
+###############################################################################
+
+### Get all albums
+# @name getAllAlbums
+GET {{baseUrl}}/albums
+Accept: application/json
+
+### Get albums for a user
+# @name getAlbumsByUser
+GET {{baseUrl}}/albums?userId=1
+Accept: application/json
+
+### Get photos in an album
+# @name getPhotosByAlbum
+GET {{baseUrl}}/albums/1/photos
+Accept: application/json
+
+### Get a single photo
+# @name getPhoto
+GET {{baseUrl}}/photos/1
+Accept: application/json
+
+###############################################################################
+# NESTED RESOURCES
+###############################################################################
+
+### Get user's posts
+# @name getUserPosts
+GET {{baseUrl}}/users/1/posts
+Accept: application/json
+
+### Get user's todos
+# @name getUserTodos
+GET {{baseUrl}}/users/1/todos
+Accept: application/json
+
+### Get user's albums
+# @name getUserAlbums
+GET {{baseUrl}}/users/1/albums
+Accept: application/json

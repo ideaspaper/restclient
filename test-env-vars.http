@@ -1,3 +1,0 @@
-### Test environment variables
-# @name testEnvVars
-GET {{API_HOST}}/get
