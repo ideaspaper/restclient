@@ -1,4 +1,4 @@
-# restclient
+# rest-client
 
 A powerful command-line HTTP client inspired by the [VS Code REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension. Send HTTP requests directly from `.http` and `.rest` files, execute cURL commands, manage environments, and more.
 
@@ -19,11 +19,19 @@ A powerful command-line HTTP client inspired by the [VS Code REST Client](https:
 
 ## Installation
 
+### Using `go install`
+
+```bash
+go install github.com/ideaspaper/rest-client@latest
+```
+
+This will install the binary as `rest-client` in your `$GOPATH/bin` directory. Make sure `$GOPATH/bin` is in your `PATH`.
+
 ### From Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/rest-client.git
+git clone https://github.com/ideaspaper/rest-client.git
 cd rest-client
 
 # Build the binary
@@ -34,6 +42,8 @@ sudo mv restclient /usr/local/bin/
 ```
 
 ### Dependencies
+
+Requires Go 1.24 or later.
 
 ```bash
 go mod download
@@ -734,4 +744,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Acknowledgments
 
 - Inspired by [VS Code REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client)
-- Built with [Cobra](https://github.com/spf13/cobra) CLI framework
+- Built with [Cobra](https://github.com/spf13/cobra) and [Viper](https://github.com/spf13/viper)

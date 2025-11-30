@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"restclient/pkg/models"
+	"github.com/ideaspaper/rest-client/pkg/models"
 )
 
 // CurlParser parses cURL commands into HttpRequest

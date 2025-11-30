@@ -8,8 +8,8 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"restclient/pkg/config"
-	"restclient/pkg/output"
+	"github.com/ideaspaper/rest-client/pkg/config"
+	"github.com/ideaspaper/rest-client/pkg/output"
 )
 
 // envCmd represents the env command

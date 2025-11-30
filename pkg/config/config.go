@@ -10,7 +10,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
-	"restclient/pkg/client"
+	"github.com/ideaspaper/rest-client/pkg/client"
 )
 
 const (

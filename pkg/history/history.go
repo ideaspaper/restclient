@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"restclient/pkg/models"
+	"github.com/ideaspaper/rest-client/pkg/models"
 )
 
 const (
