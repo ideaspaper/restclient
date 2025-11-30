@@ -22,7 +22,8 @@ builds:
       - -s -w -X github.com/ideaspaper/restclient/cmd.version={{.Version}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
@@ -42,17 +43,17 @@ changelog:
       - "Merge pull request"
       - "Merge branch"
 
-brews:
+homebrew_casks:
   - repository:
       owner: ideaspaper
       name: homebrew-tap
+    directory: Casks
     homepage: "https://github.com/ideaspaper/restclient"
     description: "A powerful command-line HTTP client for .http and .rest files"
     license: "MIT"
-    commit_author:
-      name: goreleaserbot
-      email: bot@goreleaser.com
-    install: |
-      bin.install "restclient"
-    test: |
-      system "#{bin}/restclient", "--version"
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/restclient"]
+          end

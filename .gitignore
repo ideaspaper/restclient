@@ -3,3 +3,9 @@
 .AppleDouble
 .LSOverride
 .env
+
+### Build ###
+dist/
+restclient
+coverage.out
+coverage.html
