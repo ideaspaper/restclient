@@ -22,7 +22,7 @@ A powerful command-line HTTP client inspired by the [VS Code REST Client](https:
 
 ```bash
 brew tap ideaspaper/tap
-brew install restclient
+brew install --cask restclient
 ```
 
 ### Using `go install`

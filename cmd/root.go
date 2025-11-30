@@ -40,7 +40,7 @@ Examples:
 
   # Switch environment
   restclient env use production`,
-	Version: "0.1.4",
+	Version: "0.1.5",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initConfig()
 	},
