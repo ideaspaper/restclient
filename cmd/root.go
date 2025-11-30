@@ -11,6 +11,9 @@ import (
 )
 
 var (
+	// version is set by goreleaser via ldflags
+	version = "dev"
+
 	// Global viper instance
 	v *viper.Viper
 
@@ -40,7 +43,7 @@ Examples:
 
   # Switch environment
   restclient env use production`,
-	Version: "0.1.5",
+	Version: version,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initConfig()
 	},
