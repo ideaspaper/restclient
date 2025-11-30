@@ -42,7 +42,7 @@ sudo mv restclient /usr/local/bin/
 
 ### Dependencies
 
-Requires Go 1.24 or later.
+Requires Go 1.24.4 or later.
 
 ```bash
 go mod download
