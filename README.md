@@ -18,6 +18,13 @@ A powerful command-line HTTP client inspired by the [VS Code REST Client](https:
 
 ## Installation
 
+### Using Homebrew
+
+```bash
+brew tap ideaspaper/tap
+brew install restclient
+```
+
 ### Using `go install`
 
 ```bash
@@ -236,29 +243,6 @@ restclient completion fish > ~/.config/fish/completions/restclient.fish
 
 # PowerShell
 restclient completion powershell | Out-String | Invoke-Expression
-```
-
-### update
-
-Update restclient to the latest or a specific version.
-
-```bash
-restclient update [flags]
-```
-
-**Flags:**
-| Flag | Description |
-|------|-------------|
-| `--version` | Version to install (default: "latest") |
-
-**Examples:**
-
-```bash
-# Update to the latest version
-restclient update
-
-# Update to a specific version
-restclient update --version v1.0.0
 ```
 
 ## HTTP File Format
