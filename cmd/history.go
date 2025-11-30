@@ -1,0 +1,362 @@
+package cmd
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
+
+	"restclient/pkg/config"
+	"restclient/pkg/history"
+	"restclient/pkg/models"
+	"restclient/pkg/output"
+	"restclient/pkg/variables"
+)
+
+var (
+	historyLimit int
+	historyAll   bool
+)
+
+// historyCmd represents the history command
+var historyCmd = &cobra.Command{
+	Use:   "history",
+	Short: "View and manage request history",
+	Long: `View and manage request history.
+
+Examples:
+  # List recent requests
+  restclient history list
+
+  # List last 5 requests
+  restclient history list --limit 5
+
+  # Show details of a specific request
+  restclient history show 0
+
+  # Clear all history
+  restclient history clear
+
+  # Search history
+  restclient history search "api.example.com"
+
+  # Show history statistics
+  restclient history stats
+
+  # Replay a request from history
+  restclient history replay 0`,
+}
+
+// historyListCmd lists request history
+var historyListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List recent requests",
+	RunE:  runHistoryList,
+}
+
+// historyShowCmd shows details of a history item
+var historyShowCmd = &cobra.Command{
+	Use:   "show <index>",
+	Short: "Show details of a specific request",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runHistoryShow,
+}
+
+// historyClearCmd clears all history
+var historyClearCmd = &cobra.Command{
+	Use:   "clear",
+	Short: "Clear all request history",
+	RunE:  runHistoryClear,
+}
+
+// historySearchCmd searches history
+var historySearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Search request history",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runHistorySearch,
+}
+
+// historyStatsCmd shows history statistics
+var historyStatsCmd = &cobra.Command{
+	Use:   "stats",
+	Short: "Show history statistics",
+	RunE:  runHistoryStats,
+}
+
+// historyReplayCmd replays a request from history
+var historyReplayCmd = &cobra.Command{
+	Use:   "replay <index>",
+	Short: "Replay a request from history",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runHistoryReplay,
+}
+
+func init() {
+	rootCmd.AddCommand(historyCmd)
+
+	historyCmd.AddCommand(historyListCmd)
+	historyCmd.AddCommand(historyShowCmd)
+	historyCmd.AddCommand(historyClearCmd)
+	historyCmd.AddCommand(historySearchCmd)
+	historyCmd.AddCommand(historyStatsCmd)
+	historyCmd.AddCommand(historyReplayCmd)
+
+	historyListCmd.Flags().IntVarP(&historyLimit, "limit", "l", 10, "number of items to show")
+	historyListCmd.Flags().BoolVarP(&historyAll, "all", "a", false, "show all history items")
+}
+
+func runHistoryList(cmd *cobra.Command, args []string) error {
+	histMgr, err := history.NewHistoryManager("")
+	if err != nil {
+		return fmt.Errorf("failed to load history: %w", err)
+	}
+
+	var items []models.HistoricalHttpRequest
+	if historyAll {
+		items = histMgr.GetAll()
+	} else {
+		items = histMgr.GetRecent(historyLimit)
+	}
+
+	if len(items) == 0 {
+		fmt.Println("No requests in history")
+		return nil
+	}
+
+	formatter := output.NewFormatter(!noColor)
+
+	fmt.Println(formatter.FormatInfo("Request History:"))
+	fmt.Println()
+
+	for i, item := range items {
+		printHistoryItem(item, i, !noColor)
+	}
+
+	return nil
+}
+
+func runHistoryShow(cmd *cobra.Command, args []string) error {
+	index := 0
+	fmt.Sscanf(args[0], "%d", &index)
+
+	histMgr, err := history.NewHistoryManager("")
+	if err != nil {
+		return fmt.Errorf("failed to load history: %w", err)
+	}
+
+	item, err := histMgr.GetByIndex(index)
+	if err != nil {
+		return err
+	}
+
+	formatter := output.NewFormatter(!noColor)
+
+	// Print request details
+	fmt.Println(formatter.FormatInfo("Request Details:"))
+	fmt.Println()
+
+	methodColor := color.New(color.FgGreen, color.Bold)
+	if !noColor {
+		fmt.Printf("%s %s\n", methodColor.Sprint(item.Method), item.URL)
+	} else {
+		fmt.Printf("%s %s\n", item.Method, item.URL)
+	}
+
+	fmt.Printf("Time: %s\n", time.UnixMilli(item.StartTime).Format("2006-01-02 15:04:05"))
+	fmt.Println()
+
+	if len(item.Headers) > 0 {
+		fmt.Println("Headers:")
+		for k, v := range item.Headers {
+			fmt.Printf("  %s: %s\n", k, v)
+		}
+		fmt.Println()
+	}
+
+	if item.Body != "" {
+		fmt.Println("Body:")
+		fmt.Println(item.Body)
+	}
+
+	return nil
+}
+
+func runHistoryClear(cmd *cobra.Command, args []string) error {
+	histMgr, err := history.NewHistoryManager("")
+	if err != nil {
+		return fmt.Errorf("failed to load history: %w", err)
+	}
+
+	if err := histMgr.Clear(); err != nil {
+		return fmt.Errorf("failed to clear history: %w", err)
+	}
+
+	fmt.Println("History cleared")
+	return nil
+}
+
+func runHistorySearch(cmd *cobra.Command, args []string) error {
+	query := args[0]
+
+	histMgr, err := history.NewHistoryManager("")
+	if err != nil {
+		return fmt.Errorf("failed to load history: %w", err)
+	}
+
+	items := histMgr.Search(query)
+
+	if len(items) == 0 {
+		fmt.Printf("No requests matching '%s' found\n", query)
+		return nil
+	}
+
+	fmt.Printf("Found %d matching requests:\n\n", len(items))
+
+	for i, item := range items {
+		printHistoryItem(item, i, !noColor)
+	}
+
+	return nil
+}
+
+func runHistoryStats(cmd *cobra.Command, args []string) error {
+	histMgr, err := history.NewHistoryManager("")
+	if err != nil {
+		return fmt.Errorf("failed to load history: %w", err)
+	}
+
+	stats := histMgr.GetStats()
+
+	formatter := output.NewFormatter(!noColor)
+	fmt.Println(formatter.FormatInfo("History Statistics:"))
+	fmt.Println()
+
+	fmt.Printf("Total Requests: %d\n", stats.TotalRequests)
+	fmt.Println()
+
+	if len(stats.MethodCounts) > 0 {
+		fmt.Println("By Method:")
+		for method, count := range stats.MethodCounts {
+			fmt.Printf("  %s: %d\n", method, count)
+		}
+		fmt.Println()
+	}
+
+	if len(stats.DomainCounts) > 0 {
+		fmt.Println("Top Domains:")
+		// Show top 5 domains
+		count := 0
+		for domain, c := range stats.DomainCounts {
+			if count >= 5 {
+				break
+			}
+			fmt.Printf("  %s: %d\n", domain, c)
+			count++
+		}
+		fmt.Println()
+	}
+
+	if !stats.OldestRequest.IsZero() {
+		fmt.Printf("Oldest Request: %s\n", stats.OldestRequest.Format("2006-01-02 15:04:05"))
+		fmt.Printf("Newest Request: %s\n", stats.NewestRequest.Format("2006-01-02 15:04:05"))
+	}
+
+	return nil
+}
+
+func runHistoryReplay(cmd *cobra.Command, args []string) error {
+	index := 0
+	fmt.Sscanf(args[0], "%d", &index)
+
+	histMgr, err := history.NewHistoryManager("")
+	if err != nil {
+		return fmt.Errorf("failed to load history: %w", err)
+	}
+
+	item, err := histMgr.GetByIndex(index)
+	if err != nil {
+		return err
+	}
+
+	// Convert historical request to HttpRequest
+	request := &models.HttpRequest{
+		Method:  item.Method,
+		URL:     item.URL,
+		Headers: item.Headers,
+		RawBody: item.Body,
+	}
+
+	if item.Body != "" {
+		request.Body = strings.NewReader(item.Body)
+	}
+
+	// Load config and send
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	varProcessor := variables.NewVariableProcessor()
+	varProcessor.SetEnvironment(cfg.CurrentEnvironment)
+	varProcessor.SetEnvironmentVariables(cfg.EnvironmentVariables)
+
+	return sendRequest(request, cfg, varProcessor)
+}
+
+func printHistoryItem(item models.HistoricalHttpRequest, index int, useColor bool) {
+	t := time.UnixMilli(item.StartTime)
+	timeStr := t.Format("2006-01-02 15:04:05")
+
+	if useColor {
+		methodColor := getMethodColor(item.Method)
+		indexColor := color.New(color.FgHiBlack)
+		timeColor := color.New(color.FgHiBlack)
+
+		fmt.Printf("%s %s %s  %s\n",
+			indexColor.Sprintf("[%d]", index),
+			methodColor.Sprint(item.Method),
+			truncateString(item.URL, 60),
+			timeColor.Sprint(timeStr))
+	} else {
+		fmt.Printf("[%d] %s %s  %s\n",
+			index,
+			item.Method,
+			truncateString(item.URL, 60),
+			timeStr)
+	}
+}
+
+func getMethodColor(method string) *color.Color {
+	switch method {
+	case "GET":
+		return color.New(color.FgGreen, color.Bold)
+	case "POST":
+		return color.New(color.FgYellow, color.Bold)
+	case "PUT":
+		return color.New(color.FgBlue, color.Bold)
+	case "DELETE":
+		return color.New(color.FgRed, color.Bold)
+	case "PATCH":
+		return color.New(color.FgMagenta, color.Bold)
+	default:
+		return color.New(color.FgWhite, color.Bold)
+	}
+}
+
+func loadConfig() (*config.Config, error) {
+	cfg, err := config.LoadOrCreateConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if environment != "" {
+		if err := cfg.SetEnvironment(environment); err != nil {
+			return nil, err
+		}
+	}
+
+	return cfg, nil
+}

@@ -1,0 +1,36 @@
+### Simple GET request
+# @name getUsers
+GET https://jsonplaceholder.typicode.com/users/1
+
+### POST request with JSON body
+# @name createPost
+POST https://jsonplaceholder.typicode.com/posts
+Content-Type: application/json
+
+{
+  "title": "Test Post",
+  "body": "This is a test post body",
+  "userId": 1
+}
+
+### PUT request
+# @name updatePost
+PUT https://jsonplaceholder.typicode.com/posts/1
+Content-Type: application/json
+
+{
+  "id": 1,
+  "title": "Updated Title",
+  "body": "Updated body content",
+  "userId": 1
+}
+
+### DELETE request
+# @name deletePost
+DELETE https://jsonplaceholder.typicode.com/posts/1
+
+### GET with headers
+# @name getWithHeaders
+GET https://httpbin.org/headers
+Accept: application/json
+X-Custom-Header: MyValue

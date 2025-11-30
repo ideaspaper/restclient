@@ -1,0 +1,384 @@
+package cmd
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/fatih/color"
+	"github.com/spf13/cobra"
+
+	"restclient/pkg/config"
+	"restclient/pkg/output"
+)
+
+// envCmd represents the env command
+var envCmd = &cobra.Command{
+	Use:   "env",
+	Short: "Manage environments and variables",
+	Long: `Manage environments and variables.
+
+Environments allow you to define variables that can be used in your requests.
+Variables are referenced using {{variableName}} syntax.
+
+Examples:
+  # List all environments
+  restclient env list
+
+  # Show current environment
+  restclient env current
+
+  # Switch to an environment
+  restclient env use production
+
+  # Show variables in an environment
+  restclient env show production
+
+  # Set a variable
+  restclient env set production API_URL https://api.example.com
+
+  # Create a new environment
+  restclient env create staging
+
+  # Delete an environment
+  restclient env delete staging`,
+}
+
+// envListCmd lists all environments
+var envListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all environments",
+	RunE:  runEnvList,
+}
+
+// envCurrentCmd shows the current environment
+var envCurrentCmd = &cobra.Command{
+	Use:   "current",
+	Short: "Show current environment",
+	RunE:  runEnvCurrent,
+}
+
+// envUseCmd switches to an environment
+var envUseCmd = &cobra.Command{
+	Use:   "use <environment>",
+	Short: "Switch to an environment",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runEnvUse,
+}
+
+// envShowCmd shows variables in an environment
+var envShowCmd = &cobra.Command{
+	Use:   "show [environment]",
+	Short: "Show variables in an environment",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runEnvShow,
+}
+
+// envSetCmd sets a variable in an environment
+var envSetCmd = &cobra.Command{
+	Use:   "set <environment> <variable> <value>",
+	Short: "Set a variable in an environment",
+	Args:  cobra.ExactArgs(3),
+	RunE:  runEnvSet,
+}
+
+// envUnsetCmd removes a variable from an environment
+var envUnsetCmd = &cobra.Command{
+	Use:   "unset <environment> <variable>",
+	Short: "Remove a variable from an environment",
+	Args:  cobra.ExactArgs(2),
+	RunE:  runEnvUnset,
+}
+
+// envCreateCmd creates a new environment
+var envCreateCmd = &cobra.Command{
+	Use:   "create <environment>",
+	Short: "Create a new environment",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runEnvCreate,
+}
+
+// envDeleteCmd deletes an environment
+var envDeleteCmd = &cobra.Command{
+	Use:   "delete <environment>",
+	Short: "Delete an environment",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runEnvDelete,
+}
+
+func init() {
+	rootCmd.AddCommand(envCmd)
+
+	envCmd.AddCommand(envListCmd)
+	envCmd.AddCommand(envCurrentCmd)
+	envCmd.AddCommand(envUseCmd)
+	envCmd.AddCommand(envShowCmd)
+	envCmd.AddCommand(envSetCmd)
+	envCmd.AddCommand(envUnsetCmd)
+	envCmd.AddCommand(envCreateCmd)
+	envCmd.AddCommand(envDeleteCmd)
+}
+
+func runEnvList(cmd *cobra.Command, args []string) error {
+	cfg, err := config.LoadOrCreateConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	envs := cfg.ListEnvironments()
+	formatter := output.NewFormatter(!noColor)
+
+	fmt.Println(formatter.FormatInfo("Available Environments:"))
+	fmt.Println()
+
+	if len(envs) == 0 {
+		fmt.Println("  No environments configured")
+		fmt.Println()
+		fmt.Println("  Create one with: restclient env create <name>")
+		return nil
+	}
+
+	// Sort environments
+	sort.Strings(envs)
+
+	for _, env := range envs {
+		marker := "  "
+		if env == cfg.CurrentEnvironment {
+			if !noColor {
+				marker = color.New(color.FgGreen).Sprint("* ")
+			} else {
+				marker = "* "
+			}
+		}
+		fmt.Printf("%s%s\n", marker, env)
+	}
+
+	// Show $shared info
+	if shared, ok := cfg.EnvironmentVariables["$shared"]; ok && len(shared) > 0 {
+		fmt.Println()
+		fmt.Printf("  $shared: %d variables (available in all environments)\n", len(shared))
+	}
+
+	return nil
+}
+
+func runEnvCurrent(cmd *cobra.Command, args []string) error {
+	cfg, err := config.LoadOrCreateConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if cfg.CurrentEnvironment == "" {
+		fmt.Println("No environment selected")
+		fmt.Println()
+		fmt.Println("Use: restclient env use <environment>")
+	} else {
+		fmt.Printf("Current environment: %s\n", cfg.CurrentEnvironment)
+	}
+
+	return nil
+}
+
+func runEnvUse(cmd *cobra.Command, args []string) error {
+	envName := args[0]
+
+	cfg, err := config.LoadOrCreateConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if err := cfg.SetEnvironment(envName); err != nil {
+		return err
+	}
+
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Printf("Switched to environment: %s\n", envName)
+	return nil
+}
+
+func runEnvShow(cmd *cobra.Command, args []string) error {
+	cfg, err := config.LoadOrCreateConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	envName := cfg.CurrentEnvironment
+	if len(args) > 0 {
+		envName = args[0]
+	}
+
+	if envName == "" {
+		// Show $shared
+		envName = "$shared"
+	}
+
+	vars, ok := cfg.EnvironmentVariables[envName]
+	if !ok && envName != "$shared" {
+		return fmt.Errorf("environment '%s' not found", envName)
+	}
+
+	formatter := output.NewFormatter(!noColor)
+
+	// Show $shared first if showing a specific environment
+	if envName != "$shared" {
+		if shared, ok := cfg.EnvironmentVariables["$shared"]; ok && len(shared) > 0 {
+			fmt.Println(formatter.FormatInfo("$shared variables:"))
+			printVariables(shared, !noColor)
+			fmt.Println()
+		}
+	}
+
+	fmt.Println(formatter.FormatInfo(fmt.Sprintf("Variables in '%s':", envName)))
+	if len(vars) == 0 {
+		fmt.Println("  (no variables)")
+	} else {
+		printVariables(vars, !noColor)
+	}
+
+	return nil
+}
+
+func runEnvSet(cmd *cobra.Command, args []string) error {
+	envName := args[0]
+	varName := args[1]
+	varValue := args[2]
+
+	cfg, err := config.LoadOrCreateConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if err := cfg.SetEnvironmentVariable(envName, varName, varValue); err != nil {
+		return err
+	}
+
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Printf("Set %s=%s in environment '%s'\n", varName, maskValue(varValue), envName)
+	return nil
+}
+
+func runEnvUnset(cmd *cobra.Command, args []string) error {
+	envName := args[0]
+	varName := args[1]
+
+	cfg, err := config.LoadOrCreateConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	vars, ok := cfg.EnvironmentVariables[envName]
+	if !ok {
+		return fmt.Errorf("environment '%s' not found", envName)
+	}
+
+	if _, exists := vars[varName]; !exists {
+		return fmt.Errorf("variable '%s' not found in environment '%s'", varName, envName)
+	}
+
+	delete(vars, varName)
+
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Printf("Removed %s from environment '%s'\n", varName, envName)
+	return nil
+}
+
+func runEnvCreate(cmd *cobra.Command, args []string) error {
+	envName := args[0]
+
+	cfg, err := config.LoadOrCreateConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if _, exists := cfg.EnvironmentVariables[envName]; exists {
+		return fmt.Errorf("environment '%s' already exists", envName)
+	}
+
+	if err := cfg.AddEnvironment(envName, nil); err != nil {
+		return err
+	}
+
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Printf("Created environment: %s\n", envName)
+	fmt.Println()
+	fmt.Printf("To use it: restclient env use %s\n", envName)
+	return nil
+}
+
+func runEnvDelete(cmd *cobra.Command, args []string) error {
+	envName := args[0]
+
+	cfg, err := config.LoadOrCreateConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	if err := cfg.RemoveEnvironment(envName); err != nil {
+		return err
+	}
+
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Printf("Deleted environment: %s\n", envName)
+	return nil
+}
+
+func printVariables(vars map[string]string, useColor bool) {
+	// Sort variable names
+	var names []string
+	for name := range vars {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	nameColor := color.New(color.FgCyan)
+	valueColor := color.New(color.FgWhite)
+
+	for _, name := range names {
+		value := vars[name]
+		displayValue := maskValue(value)
+
+		if useColor {
+			fmt.Printf("  %s = %s\n", nameColor.Sprint(name), valueColor.Sprint(displayValue))
+		} else {
+			fmt.Printf("  %s = %s\n", name, displayValue)
+		}
+	}
+}
+
+func maskValue(value string) string {
+	// Mask sensitive values
+	lowerValue := strings.ToLower(value)
+	if strings.Contains(lowerValue, "password") ||
+		strings.Contains(lowerValue, "secret") ||
+		strings.Contains(lowerValue, "token") ||
+		strings.Contains(lowerValue, "key") ||
+		strings.Contains(lowerValue, "api_key") ||
+		strings.Contains(lowerValue, "apikey") {
+		if len(value) > 4 {
+			return value[:4] + strings.Repeat("*", len(value)-4)
+		}
+		return strings.Repeat("*", len(value))
+	}
+
+	// Truncate long values
+	if len(value) > 50 {
+		return value[:47] + "..."
+	}
+
+	return value
+}
