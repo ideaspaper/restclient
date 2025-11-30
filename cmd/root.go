@@ -26,7 +26,7 @@ var rootCmd = &cobra.Command{
 	Use:   "restclient",
 	Short: "A CLI HTTP client inspired by VS Code REST Client",
 	Long: `restclient is a command-line HTTP client that supports .http and .rest files,
-cURL commands, environment variables, and request chaining.
+environment variables, and request chaining.
 
 Examples:
   # Send a request from a .http file
@@ -34,9 +34,6 @@ Examples:
 
   # Send a specific request by name
   restclient send api.http --name getUsers
-
-  # Send a cURL command
-  restclient curl 'curl -X GET https://api.example.com/users'
 
   # List available environments
   restclient env list

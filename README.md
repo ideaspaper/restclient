@@ -1,11 +1,10 @@
 # rest-client
 
-A powerful command-line HTTP client inspired by the [VS Code REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension. Send HTTP requests directly from `.http` and `.rest` files, execute cURL commands, manage environments, and more.
+A powerful command-line HTTP client inspired by the [VS Code REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension. Send HTTP requests directly from `.http` and `.rest` files, manage environments, and more.
 
 ## Features
 
 - Parse and execute requests from `.http` and `.rest` files
-- Execute cURL commands directly
 - Multiple environments with variable support
 - System variables (UUID, timestamps, random values, etc.)
 - File variables and `.env` file support
@@ -56,9 +55,6 @@ go mod download
 ```bash
 # Send a request from a .http file
 restclient send api.http
-
-# Execute a cURL command
-restclient curl 'curl -X GET https://api.example.com/users'
 
 # Send with a specific environment
 restclient send api.http -e production
@@ -126,26 +122,6 @@ restclient send api.http --output response.json
 
 # Only show response body
 restclient send api.http --body
-```
-
-### curl
-
-Execute cURL commands directly.
-
-```bash
-restclient curl '<curl command>'
-```
-
-**Examples:**
-```bash
-# Simple GET request
-restclient curl 'curl https://api.example.com/users'
-
-# POST with JSON data
-restclient curl 'curl -X POST -H "Content-Type: application/json" -d "{\"name\":\"test\"}" https://api.example.com/users'
-
-# With authentication
-restclient curl 'curl -u user:pass https://api.example.com/protected'
 ```
 
 ### env

@@ -64,22 +64,8 @@ Examples:
 	RunE: runSend,
 }
 
-// curlCmd represents the curl command
-var curlCmd = &cobra.Command{
-	Use:   "curl <curl command>",
-	Short: "Execute a cURL command",
-	Long: `Execute a cURL command and display the response.
-
-Examples:
-  restclient curl 'curl -X GET https://api.example.com/users'
-  restclient curl 'curl -X POST -H "Content-Type: application/json" -d "{\"name\":\"test\"}" https://api.example.com/users'`,
-	Args: cobra.ExactArgs(1),
-	RunE: runCurl,
-}
-
 func init() {
 	rootCmd.AddCommand(sendCmd)
-	rootCmd.AddCommand(curlCmd)
 
 	// Send command flags
 	sendCmd.Flags().StringVarP(&requestName, "name", "n", "", "request name (from @name metadata)")
@@ -88,12 +74,6 @@ func init() {
 	sendCmd.Flags().BoolVar(&showBody, "body", false, "only show response body")
 	sendCmd.Flags().StringVarP(&outputFile, "output", "o", "", "save response body to file")
 	sendCmd.Flags().BoolVar(&noHistory, "no-history", false, "don't save request to history")
-
-	// Curl command flags
-	curlCmd.Flags().BoolVar(&showHeaders, "headers", false, "only show response headers")
-	curlCmd.Flags().BoolVar(&showBody, "body", false, "only show response body")
-	curlCmd.Flags().StringVarP(&outputFile, "output", "o", "", "save response body to file")
-	curlCmd.Flags().BoolVar(&noHistory, "no-history", false, "don't save request to history")
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -190,29 +170,6 @@ func runSend(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send request
-	return sendRequest(request, cfg, varProcessor)
-}
-
-func runCurl(cmd *cobra.Command, args []string) error {
-	curlCommand := args[0]
-
-	// Load config
-	cfg, err := config.LoadOrCreateConfig()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Parse cURL command
-	request, err := parser.ParseCurl(curlCommand, cfg.DefaultHeaders)
-	if err != nil {
-		return fmt.Errorf("failed to parse curl command: %w", err)
-	}
-
-	// Create variable processor for any environment variable resolution
-	varProcessor := variables.NewVariableProcessor()
-	varProcessor.SetEnvironment(cfg.CurrentEnvironment)
-	varProcessor.SetEnvironmentVariables(cfg.EnvironmentVariables)
-
 	return sendRequest(request, cfg, varProcessor)
 }
 
