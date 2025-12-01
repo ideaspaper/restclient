@@ -6,6 +6,7 @@ A powerful command-line HTTP client inspired by the [VS Code REST Client](https:
 
 - Parse and execute requests from `.http` and `.rest` files
 - **JavaScript scripting** for testing responses and chaining requests (like Postman)
+- **Postman Collection v2.1.0 import/export** - full compatibility with Postman
 - Multiple environments with variable support
 - System variables (UUID, timestamps, random values, etc.)
 - File variables and `.env` file support
@@ -244,6 +245,122 @@ restclient completion fish > ~/.config/fish/completions/restclient.fish
 
 # PowerShell
 restclient completion powershell | Out-String | Invoke-Expression
+```
+
+### postman
+
+Import and export Postman Collection v2.1.0 files.
+
+#### postman import
+
+Import a Postman collection to `.http` file(s).
+
+```bash
+restclient postman import <collection.json> [flags]
+```
+
+**Flags:**
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--output` | `-o` | Output path (directory for multi-file, file path for `--single-file`) |
+| `--single-file` | | Write all requests to a single .http file |
+| `--no-variables` | | Don't include collection variables |
+| `--no-scripts` | | Don't include pre-request and test scripts |
+
+**Examples:**
+
+```bash
+# Import to current directory (creates Collection-Name/ folder with subfolders)
+restclient postman import my-collection.json
+
+# Import to specific directory
+restclient postman import my-collection.json -o ./api-requests
+
+# Import as single file (creates my-collection.http in current directory)
+restclient postman import my-collection.json --single-file
+
+# Import as single file with custom path
+restclient postman import my-collection.json --single-file -o ./api/my-api.http
+
+# Import without variables
+restclient postman import my-collection.json --no-variables
+
+# Import without scripts
+restclient postman import my-collection.json --no-scripts
+```
+
+**Import Features:**
+- Converts all request types (GET, POST, PUT, DELETE, PATCH, etc.)
+- Preserves folder structure as directories
+- Converts authentication (Basic, Bearer, Digest, AWS v4, API Key, OAuth1/2)
+- Converts body types (raw, form-urlencoded, form-data, GraphQL)
+- Converts pre-request and test scripts to `< {% %}` and `> {% %}` blocks
+- Converts collection variables to file variables
+
+#### postman export
+
+Export `.http` file(s) to a Postman collection.
+
+```bash
+restclient postman export <file.http> [files...] [flags]
+```
+
+**Flags:**
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--output` | `-o` | Output file path (default: collection.json) |
+| `--name` | `-n` | Collection name (default: derived from filename) |
+| `--description` | `-d` | Collection description |
+| `--no-variables` | | Don't include file variables |
+| `--no-scripts` | | Don't include scripts |
+| `--minify` | | Minify JSON output |
+
+**Examples:**
+
+```bash
+# Export single file
+restclient postman export api.http
+
+# Export with custom output path
+restclient postman export api.http -o my-collection.json
+
+# Export with custom name and description
+restclient postman export api.http -n "My API" -d "API collection for testing"
+
+# Export multiple files into one collection
+restclient postman export users.http orders.http products.http -n "Full API"
+
+# Export without variables and scripts
+restclient postman export api.http --no-variables --no-scripts
+
+# Export minified
+restclient postman export api.http --minify
+```
+
+**Export Features:**
+- Exports all requests with headers and body
+- Converts authentication headers to Postman auth objects
+- Converts file variables to collection variables
+- Converts pre-request scripts (`< {% %}`) to Postman pre-request events
+- Converts post-response scripts (`> {% %}`) to Postman test events
+- Supports multiple input files merged into one collection
+
+#### Round-Trip Compatibility
+
+You can import a Postman collection, modify the `.http` files, and export back to Postman:
+
+```bash
+# Import from Postman (creates ./My-API/ folder with subfolders)
+restclient postman import my-api.postman_collection.json
+
+# Or import to a specific directory
+restclient postman import my-api.postman_collection.json -o ./api
+
+# Edit .http files as needed
+# ...
+
+# Export back to Postman
+restclient postman export ./My-API/**/*.http -n "My API" -o updated-collection.json
 ```
 
 ## HTTP File Format
