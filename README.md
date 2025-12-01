@@ -976,7 +976,7 @@ Configure proxy in `~/.restclient/config.json`:
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License - see [LICENSE](./LICENSE) file for details.
 
 ## Contributing
 
