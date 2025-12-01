@@ -3,15 +3,19 @@ module github.com/ideaspaper/restclient
 go 1.24.4
 
 require (
+	github.com/dop251/goja v0.0.0-20251121114222-56b1242a5f86
 	github.com/fatih/color v1.16.0
 	github.com/fsnotify/fsnotify v1.7.0
-	github.com/google/uuid v1.4.0
+	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
 	golang.org/x/term v0.37.0
 )
 
 require (
+	github.com/dlclark/regexp2 v1.11.4 // indirect
+	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
+	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect

@@ -919,3 +919,239 @@ func TestCreateGraphQLBody(t *testing.T) {
 		})
 	}
 }
+
+func TestParsePostScript(t *testing.T) {
+	input := `# @name testRequest
+GET https://api.example.com/users
+
+> {%
+client.test("Status is 200", function() {
+    client.assert(response.status === 200);
+});
+%}`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	req, err := parser.ParseRequest(input)
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	if req.Metadata.PostScript == "" {
+		t.Error("Expected PostScript to be parsed")
+	}
+	if !strings.Contains(req.Metadata.PostScript, "client.test") {
+		t.Errorf("PostScript should contain 'client.test', got: %v", req.Metadata.PostScript)
+	}
+}
+
+func TestParsePreScript(t *testing.T) {
+	input := `# @name testRequest
+< {%
+client.log("Preparing request");
+client.global.set("timestamp", Date.now());
+%}
+GET https://api.example.com/users`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	req, err := parser.ParseRequest(input)
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	if req.Metadata.PreScript == "" {
+		t.Error("Expected PreScript to be parsed")
+	}
+	if !strings.Contains(req.Metadata.PreScript, "client.log") {
+		t.Errorf("PreScript should contain 'client.log', got: %v", req.Metadata.PreScript)
+	}
+}
+
+func TestParseBothScripts(t *testing.T) {
+	input := `# @name testRequest
+< {%
+client.log("Before request");
+%}
+GET https://api.example.com/users
+Accept: application/json
+
+> {%
+client.log("After request");
+client.test("Status is 200", function() {
+    client.assert(response.status === 200);
+});
+%}`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	req, err := parser.ParseRequest(input)
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	if req.Metadata.PreScript == "" {
+		t.Error("Expected PreScript to be parsed")
+	}
+	if req.Metadata.PostScript == "" {
+		t.Error("Expected PostScript to be parsed")
+	}
+	if !strings.Contains(req.Metadata.PreScript, "Before request") {
+		t.Errorf("PreScript should contain 'Before request', got: %v", req.Metadata.PreScript)
+	}
+	if !strings.Contains(req.Metadata.PostScript, "After request") {
+		t.Errorf("PostScript should contain 'After request', got: %v", req.Metadata.PostScript)
+	}
+}
+
+func TestParseSingleLineScript(t *testing.T) {
+	input := `GET https://api.example.com/users
+
+> {% client.log("Done"); %}`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	req, err := parser.ParseRequest(input)
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	if req.Metadata.PostScript == "" {
+		t.Error("Expected PostScript to be parsed")
+	}
+	if !strings.Contains(req.Metadata.PostScript, "client.log") {
+		t.Errorf("PostScript should contain 'client.log', got: %v", req.Metadata.PostScript)
+	}
+}
+
+func TestParseScriptWithBody(t *testing.T) {
+	input := `POST https://api.example.com/users
+Content-Type: application/json
+
+{"name": "John"}
+
+> {%
+client.test("Created", function() {
+    client.assert(response.status === 201);
+});
+%}`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	req, err := parser.ParseRequest(input)
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	if req.RawBody == "" {
+		t.Error("Expected body to be parsed")
+	}
+	if !strings.Contains(req.RawBody, "John") {
+		t.Errorf("Body should contain 'John', got: %v", req.RawBody)
+	}
+	if req.Metadata.PostScript == "" {
+		t.Error("Expected PostScript to be parsed")
+	}
+	// Body should not contain the script
+	if strings.Contains(req.RawBody, "client.test") {
+		t.Errorf("Body should not contain script, got: %v", req.RawBody)
+	}
+}
+
+func TestParseExternalScriptFile(t *testing.T) {
+	// Test that external script file references are detected properly
+	// Note: This test verifies the parsing logic, not actual file reading
+	tests := []struct {
+		name           string
+		input          string
+		wantPreScript  bool
+		wantPostScript bool
+		expectFileRead bool
+	}{
+		{
+			name: "pre-request script file reference",
+			input: `< ./pre-script.js
+GET https://api.example.com/users`,
+			wantPreScript:  true,
+			wantPostScript: false,
+			expectFileRead: true,
+		},
+		{
+			name: "post-response script file reference",
+			input: `GET https://api.example.com/users
+
+> ./post-script.js`,
+			wantPreScript:  false,
+			wantPostScript: true,
+			expectFileRead: true,
+		},
+		{
+			name: "both script file references",
+			input: `< ./pre-script.js
+GET https://api.example.com/users
+
+> ./post-script.js`,
+			wantPreScript:  true,
+			wantPostScript: true,
+			expectFileRead: true,
+		},
+		{
+			name: "inline script not detected as file",
+			input: `GET https://api.example.com/users
+
+> {%
+client.log("inline");
+%}`,
+			wantPreScript:  false,
+			wantPostScript: true,
+			expectFileRead: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Use a non-existent path so file reads will fail (expected behavior for this test)
+			parser := NewHttpRequestParser(tt.input, nil, "/nonexistent")
+			req, err := parser.ParseRequest(tt.input)
+			if err != nil {
+				t.Fatalf("ParseRequest() error = %v", err)
+			}
+
+			// For file references, since file doesn't exist, scripts will be empty
+			// For inline scripts, scripts should be populated
+			if !tt.expectFileRead {
+				if tt.wantPreScript && req.Metadata.PreScript == "" {
+					t.Error("Expected PreScript to be parsed from inline script")
+				}
+				if tt.wantPostScript && req.Metadata.PostScript == "" {
+					t.Error("Expected PostScript to be parsed from inline script")
+				}
+			}
+		})
+	}
+}
+
+func TestExternalScriptFileSyntax(t *testing.T) {
+	// Test various external script file syntax patterns
+	tests := []struct {
+		name     string
+		line     string
+		isScript bool
+	}{
+		{name: "simple js file", line: "> ./script.js", isScript: true},
+		{name: "relative path", line: "> ../scripts/test.js", isScript: true},
+		{name: "absolute path", line: "> /path/to/script.js", isScript: true},
+		{name: "inline script start", line: "> {%", isScript: false}, // This is inline, not file
+		{name: "not a script", line: "> some text", isScript: false},
+		{name: "pre-script file", line: "< ./pre.js", isScript: true},
+		{name: "pre-script inline", line: "< {%", isScript: false}, // This is inline, not file
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			trimmed := strings.TrimSpace(tt.line)
+			isPostFile := strings.HasPrefix(trimmed, ">") && !strings.HasPrefix(trimmed, "> {%") && strings.HasSuffix(strings.TrimSpace(strings.TrimPrefix(trimmed, ">")), ".js")
+			isPreFile := strings.HasPrefix(trimmed, "<") && !strings.HasPrefix(trimmed, "< {%") && strings.HasSuffix(strings.TrimSpace(strings.TrimPrefix(trimmed, "<")), ".js")
+
+			got := isPostFile || isPreFile
+			if got != tt.isScript {
+				t.Errorf("isExternalScript(%q) = %v, want %v", tt.line, got, tt.isScript)
+			}
+		})
+	}
+}

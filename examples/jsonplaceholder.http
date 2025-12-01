@@ -208,3 +208,227 @@ Accept: application/json
 # @name getUserAlbums
 GET {{baseUrl}}/users/1/albums
 Accept: application/json
+
+###############################################################################
+# SCRIPTING EXAMPLES
+###############################################################################
+
+### Get post with tests
+# @name getPostWithTests
+GET {{baseUrl}}/posts/1
+Accept: application/json
+
+> {%
+client.test("Status is 200", function() {
+    client.assert(response.status === 200, "Expected status 200");
+});
+
+client.test("Response has id", function() {
+    client.assert(response.body.id === 1, "Expected id to be 1");
+});
+
+client.test("Response has title", function() {
+    client.assert(response.body.title !== undefined, "Expected title to exist");
+});
+
+// Log some information
+client.log("Post title: " + response.body.title);
+
+// Store post ID for later use
+client.global.set("postId", response.body.id);
+%}
+
+### Create post and verify response
+# @name createPostWithTests
+POST {{baseUrl}}/posts
+Content-Type: application/json
+
+{
+    "title": "Test Post",
+    "body": "This is a test post",
+    "userId": 1
+}
+
+> {%
+client.test("Status is 201", function() {
+    client.assert(response.status === 201, "Expected status 201 for created resource");
+});
+
+client.test("Response contains id", function() {
+    client.assert(response.body.id !== undefined, "Expected response to have an id");
+});
+
+client.test("Title matches", function() {
+    client.assert(response.body.title === "Test Post", "Title should match");
+});
+
+// Store the created post ID
+client.global.set("createdPostId", response.body.id);
+client.log("Created post with ID: " + response.body.id);
+%}
+
+### Get users with content type validation
+# @name getUsersWithContentTypeCheck
+GET {{baseUrl}}/users
+Accept: application/json
+
+> {%
+client.test("Status is 200", function() {
+    client.assert(response.status === 200);
+});
+
+client.test("Content-Type is JSON", function() {
+    var contentType = response.headers.valueOf("Content-Type");
+    client.assert(contentType.includes("application/json"), "Expected JSON content type");
+});
+
+client.test("Response is an array", function() {
+    client.assert(Array.isArray(response.body), "Expected response to be an array");
+});
+
+client.test("Has at least one user", function() {
+    client.assert(response.body.length > 0, "Expected at least one user");
+});
+
+// Log user count
+client.log("Found " + response.body.length + " users");
+%}
+
+### Pre-request script example
+# @name preRequestExample
+< {%
+// This runs before the request is sent
+client.log("Preparing request...");
+var timestamp = Date.now();
+client.global.set("requestTimestamp", timestamp);
+%}
+GET {{baseUrl}}/posts/1
+Accept: application/json
+
+> {%
+client.test("Request was successful", function() {
+    client.assert(response.status === 200);
+});
+
+client.log("Request completed");
+%}
+
+###############################################################################
+# UTILITY FUNCTIONS EXAMPLES
+###############################################################################
+
+### Using built-in utility functions
+# @name utilityFunctionsDemo
+< {%
+// Generate unique request ID
+var requestId = $uuid();
+client.global.set("requestId", requestId);
+client.log("Request ID: " + requestId);
+
+// Generate timestamp
+var ts = $timestamp();
+client.log("Timestamp: " + ts);
+
+// ISO timestamp
+var isoTs = $isoTimestamp();
+client.log("ISO Timestamp: " + isoTs);
+%}
+POST {{baseUrl}}/posts
+Content-Type: application/json
+X-Request-ID: {{requestId}}
+
+{
+    "title": "Post with UUID",
+    "body": "This post was created with a unique request ID",
+    "userId": 1
+}
+
+> {%
+client.test("Post created successfully", function() {
+    client.assert(response.status === 201);
+});
+
+// Hash the response body
+var bodyHash = $sha256(JSON.stringify(response.body));
+client.log("Response hash: " + bodyHash);
+
+// Generate a random session token
+var sessionToken = $randomString(32);
+client.global.set("sessionToken", sessionToken);
+client.log("Session token: " + sessionToken);
+%}
+
+### Base64 encoding/decoding example
+# @name base64Example
+< {%
+// Encode credentials for Basic auth simulation
+var credentials = "username:password";
+var encoded = $base64(credentials);
+client.global.set("encodedCredentials", encoded);
+client.log("Encoded: " + encoded);
+
+// Decode to verify
+var decoded = $base64Decode(encoded);
+client.log("Decoded: " + decoded);
+%}
+GET {{baseUrl}}/users/1
+Accept: application/json
+
+> {%
+client.test("Status is 200", function() {
+    client.assert(response.status === 200);
+});
+%}
+
+### Hashing example
+# @name hashingExample
+GET {{baseUrl}}/posts/1
+Accept: application/json
+
+> {%
+// Hash the response for integrity checking
+var bodyStr = JSON.stringify(response.body);
+
+var md5Hash = $md5(bodyStr);
+var sha256Hash = $sha256(bodyStr);
+var sha512Hash = $sha512(bodyStr);
+
+client.log("MD5: " + md5Hash);
+client.log("SHA256: " + sha256Hash);
+client.log("SHA512 (first 32 chars): " + sha512Hash.substring(0, 32) + "...");
+
+// Store hashes for comparison
+client.global.set("responseHash", sha256Hash);
+
+client.test("Response integrity check", function() {
+    client.assert(sha256Hash.length === 64, "SHA256 should be 64 chars");
+});
+%}
+
+### Random values example
+# @name randomValuesExample
+< {%
+// Generate random values for the request
+var orderId = $randomInt(10000, 99999);
+var verificationCode = $randomString(6);
+
+client.global.set("orderId", orderId);
+client.global.set("verificationCode", verificationCode);
+
+client.log("Order ID: " + orderId);
+client.log("Verification Code: " + verificationCode);
+%}
+POST {{baseUrl}}/posts
+Content-Type: application/json
+
+{
+    "title": "Order #{{orderId}}",
+    "body": "Verification code: {{verificationCode}}",
+    "userId": 1
+}
+
+> {%
+client.test("Created with random values", function() {
+    client.assert(response.status === 201);
+});
+%}

@@ -19,6 +19,7 @@ const (
 	ParseStateURL ParseState = iota
 	ParseStateHeader
 	ParseStateBody
+	ParseStatePostScript
 )
 
 // HttpRequestParser parses HTTP request files (.http, .rest)
@@ -80,14 +81,109 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	var requestLines []string
 	var headerLines []string
 	var bodyLines []string
+	var preScriptLines []string
+	var postScriptLines []string
 	var metadata models.RequestMetadata
 
 	state := ParseStateURL
 	foundRequestLine := false
+	inPreScript := false
+	inPostScript := false
 
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 		trimmedLine := strings.TrimSpace(line)
+
+		// Check for pre-request script file reference: < ./script.js (not < {% which is inline)
+		if !foundRequestLine && strings.HasPrefix(trimmedLine, "<") && !strings.HasPrefix(trimmedLine, "< {%") {
+			scriptPath := strings.TrimSpace(strings.TrimPrefix(trimmedLine, "<"))
+			// Check if it looks like a script file path (ends with .js)
+			if strings.HasSuffix(scriptPath, ".js") {
+				content, err := p.readFileContent(scriptPath, "")
+				if err == nil {
+					preScriptLines = append(preScriptLines, content)
+				}
+				continue
+			}
+		}
+
+		// Check for pre-request script start: < {%
+		if !foundRequestLine && strings.HasPrefix(trimmedLine, "< {%") {
+			inPreScript = true
+			// Check if script content is on the same line
+			rest := strings.TrimPrefix(trimmedLine, "< {%")
+			if strings.Contains(rest, "%}") {
+				// Single line script
+				scriptContent := strings.TrimSuffix(rest, "%}")
+				preScriptLines = append(preScriptLines, strings.TrimSpace(scriptContent))
+				inPreScript = false
+			}
+			continue
+		}
+
+		// Check for pre-script end
+		if inPreScript {
+			if strings.Contains(trimmedLine, "%}") {
+				// End of pre-script
+				beforeEnd := strings.Split(trimmedLine, "%}")[0]
+				if strings.TrimSpace(beforeEnd) != "" {
+					preScriptLines = append(preScriptLines, beforeEnd)
+				}
+				inPreScript = false
+			} else {
+				preScriptLines = append(preScriptLines, line)
+			}
+			continue
+		}
+
+		// Check for post-response script file reference: > ./script.js (not > {% which is inline)
+		if foundRequestLine && strings.HasPrefix(trimmedLine, ">") && !strings.HasPrefix(trimmedLine, "> {%") {
+			scriptPath := strings.TrimSpace(strings.TrimPrefix(trimmedLine, ">"))
+			// Check if it looks like a script file path (ends with .js)
+			if strings.HasSuffix(scriptPath, ".js") {
+				content, err := p.readFileContent(scriptPath, "")
+				if err == nil {
+					postScriptLines = append(postScriptLines, content)
+				}
+				state = ParseStatePostScript
+				continue
+			}
+		}
+
+		// Check for post-response script start: > {%
+		if foundRequestLine && strings.HasPrefix(trimmedLine, "> {%") {
+			inPostScript = true
+			state = ParseStatePostScript
+			// Check if script content is on the same line
+			rest := strings.TrimPrefix(trimmedLine, "> {%")
+			if strings.Contains(rest, "%}") {
+				// Single line script
+				scriptContent := strings.TrimSuffix(rest, "%}")
+				postScriptLines = append(postScriptLines, strings.TrimSpace(scriptContent))
+				inPostScript = false
+			}
+			continue
+		}
+
+		// Check for post-script end
+		if inPostScript {
+			if strings.Contains(trimmedLine, "%}") {
+				// End of post-script
+				beforeEnd := strings.Split(trimmedLine, "%}")[0]
+				if strings.TrimSpace(beforeEnd) != "" {
+					postScriptLines = append(postScriptLines, beforeEnd)
+				}
+				inPostScript = false
+			} else {
+				postScriptLines = append(postScriptLines, line)
+			}
+			continue
+		}
+
+		// Skip if we're in post-script state but not inside a script block
+		if state == ParseStatePostScript && !inPostScript {
+			continue
+		}
 
 		// Skip empty lines at the beginning
 		if !foundRequestLine && trimmedLine == "" {
@@ -147,12 +243,32 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 			}
 
 		case ParseStateBody:
+			// Check if this line starts a post-script
+			if strings.HasPrefix(trimmedLine, "> {%") {
+				inPostScript = true
+				state = ParseStatePostScript
+				rest := strings.TrimPrefix(trimmedLine, "> {%")
+				if strings.Contains(rest, "%}") {
+					scriptContent := strings.TrimSuffix(rest, "%}")
+					postScriptLines = append(postScriptLines, strings.TrimSpace(scriptContent))
+					inPostScript = false
+				}
+				continue
+			}
 			bodyLines = append(bodyLines, line) // Preserve original line with whitespace
 		}
 	}
 
 	if !foundRequestLine {
 		return nil, fmt.Errorf("no request line found")
+	}
+
+	// Set scripts in metadata
+	if len(preScriptLines) > 0 {
+		metadata.PreScript = strings.Join(preScriptLines, "\n")
+	}
+	if len(postScriptLines) > 0 {
+		metadata.PostScript = strings.Join(postScriptLines, "\n")
 	}
 
 	// Parse request line

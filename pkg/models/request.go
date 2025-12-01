@@ -36,6 +36,8 @@ type RequestMetadata struct {
 	NoRedirect  bool
 	NoCookieJar bool
 	Prompts     []PromptVariable
+	PreScript   string // JavaScript to run before the request
+	PostScript  string // JavaScript to run after the response
 }
 
 // PromptVariable represents a variable that requires user input

@@ -19,6 +19,7 @@ import (
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/output"
 	"github.com/ideaspaper/restclient/pkg/parser"
+	"github.com/ideaspaper/restclient/pkg/scripting"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
 
@@ -160,6 +161,50 @@ func runSend(cmd *cobra.Command, args []string) error {
 		varProcessor.SetFileVariables(map[string]string{pv.Name: value})
 	}
 
+	// Execute pre-request script BEFORE variable processing
+	// This allows scripts to set variables that can be used in the request
+	if request.Metadata.PreScript != "" {
+		scriptCtx := scripting.NewScriptContext()
+		scriptCtx.SetRequest(request)
+
+		// Copy environment variables to script context
+		if cfg.EnvironmentVariables != nil {
+			if shared, ok := cfg.EnvironmentVariables["$shared"]; ok {
+				for k, v := range shared {
+					scriptCtx.SetEnvVar(k, v)
+				}
+			}
+			if current, ok := cfg.EnvironmentVariables[cfg.CurrentEnvironment]; ok {
+				for k, v := range current {
+					scriptCtx.SetEnvVar(k, v)
+				}
+			}
+		}
+
+		engine := scripting.NewEngine()
+		result, err := engine.Execute(request.Metadata.PreScript, scriptCtx)
+		if err != nil {
+			return fmt.Errorf("pre-request script error: %w", err)
+		}
+		if result.Error != nil {
+			return fmt.Errorf("pre-request script failed: %w", result.Error)
+		}
+
+		// Print script logs
+		for _, log := range result.Logs {
+			fmt.Printf("[pre-script] %s\n", log)
+		}
+
+		// Apply global variables set by script to variable processor
+		for k, v := range result.GlobalVars {
+			if strVal, ok := v.(string); ok {
+				varProcessor.SetFileVariables(map[string]string{k: strVal})
+			} else {
+				varProcessor.SetFileVariables(map[string]string{k: fmt.Sprintf("%v", v)})
+			}
+		}
+	}
+
 	// Process variables in URL, headers, and body
 	var varErr error
 	request.URL, varErr = varProcessor.Process(request.URL)
@@ -235,9 +280,90 @@ func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *
 		})
 	}
 
+	// Execute post-response script if present
+	if request.Metadata.PostScript != "" {
+		scriptCtx := scripting.NewScriptContext()
+		scriptCtx.SetRequest(request)
+		scriptCtx.SetResponse(resp)
+
+		// Copy environment variables to script context
+		if cfg.EnvironmentVariables != nil {
+			if shared, ok := cfg.EnvironmentVariables["$shared"]; ok {
+				for k, v := range shared {
+					scriptCtx.SetEnvVar(k, v)
+				}
+			}
+			if current, ok := cfg.EnvironmentVariables[cfg.CurrentEnvironment]; ok {
+				for k, v := range current {
+					scriptCtx.SetEnvVar(k, v)
+				}
+			}
+		}
+
+		engine := scripting.NewEngine()
+		result, err := engine.Execute(request.Metadata.PostScript, scriptCtx)
+		if err != nil {
+			return fmt.Errorf("post-response script error: %w", err)
+		}
+
+		// Print script logs
+		for _, log := range result.Logs {
+			fmt.Printf("[script] %s\n", log)
+		}
+
+		// Print test results
+		if len(result.Tests) > 0 {
+			fmt.Println()
+			printTestResults(result.Tests, !noColor && cfg.ShowColors)
+		}
+
+		// Apply global variables set by script to variable processor
+		for k, v := range result.GlobalVars {
+			if strVal, ok := v.(string); ok {
+				varProcessor.SetFileVariables(map[string]string{k: strVal})
+			} else {
+				varProcessor.SetFileVariables(map[string]string{k: fmt.Sprintf("%v", v)})
+			}
+		}
+
+		// Check for script errors after processing
+		if result.Error != nil {
+			return fmt.Errorf("post-response script failed: %w", result.Error)
+		}
+
+		// Check if any tests failed
+		for _, test := range result.Tests {
+			if !test.Passed {
+				return fmt.Errorf("test '%s' failed: %s", test.Name, test.Error)
+			}
+		}
+	}
+
 	// Format and display response
 	formatter := output.NewFormatter(!noColor && cfg.ShowColors)
 	return displayResponse(resp, formatter)
+}
+
+func printTestResults(tests []scripting.TestResult, useColors bool) {
+	passColor := color.New(color.FgGreen)
+	failColor := color.New(color.FgRed)
+
+	fmt.Println("Test Results:")
+	for _, test := range tests {
+		if test.Passed {
+			if useColors {
+				fmt.Printf("  %s %s\n", passColor.Sprint("✓"), test.Name)
+			} else {
+				fmt.Printf("  [PASS] %s\n", test.Name)
+			}
+		} else {
+			if useColors {
+				fmt.Printf("  %s %s: %s\n", failColor.Sprint("✗"), test.Name, test.Error)
+			} else {
+				fmt.Printf("  [FAIL] %s: %s\n", test.Name, test.Error)
+			}
+		}
+	}
 }
 
 func displayResponse(resp *models.HttpResponse, formatter *output.Formatter) error {

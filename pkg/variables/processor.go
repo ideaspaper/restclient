@@ -82,9 +82,11 @@ func (vp *VariableProcessor) SetEnvironmentVariables(vars map[string]map[string]
 	vp.envVariables = vars
 }
 
-// SetFileVariables sets file variables
+// SetFileVariables merges file variables into existing ones
 func (vp *VariableProcessor) SetFileVariables(vars map[string]string) {
-	vp.fileVariables = vars
+	for k, v := range vars {
+		vp.fileVariables[k] = v
+	}
 }
 
 // SetRequestResult stores a request result for request variables
