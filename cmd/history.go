@@ -303,7 +303,9 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 	varProcessor.SetEnvironment(cfg.CurrentEnvironment)
 	varProcessor.SetEnvironmentVariables(cfg.EnvironmentVariables)
 
-	// Use empty path for history replay (no session scoping)
+	// Replay without session - history already contains the Cookie header that was sent
+	noSession = true
+
 	return sendRequest("", request, cfg, varProcessor)
 }
 

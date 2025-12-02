@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -241,7 +242,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	// Dry run - just print the request without sending
 	if dryRun {
-		return printDryRun(request, cfg)
+		return printDryRun(filePath, request, cfg)
 	}
 
 	// Send request
@@ -325,7 +326,24 @@ func sendRequest(httpFilePath string, request *models.HttpRequest, cfg *config.C
 	if !noHistory {
 		histMgr, err := history.NewHistoryManager("")
 		if err == nil {
-			histMgr.Add(request)
+			// Create a copy of request with actual Cookie header that was sent
+			historyRequest := *request
+			historyRequest.Headers = make(map[string]string)
+			for k, v := range request.Headers {
+				historyRequest.Headers[k] = v
+			}
+			// Add Cookie header if cookies were sent
+			if sessionMgr != nil && !request.Metadata.NoCookieJar {
+				cookies := sessionMgr.GetCookiesForURL(request.URL)
+				if len(cookies) > 0 {
+					var cookieParts []string
+					for _, c := range cookies {
+						cookieParts = append(cookieParts, c.Name+"="+c.Value)
+					}
+					historyRequest.Headers["Cookie"] = strings.Join(cookieParts, "; ")
+				}
+			}
+			histMgr.Add(&historyRequest)
 		}
 	}
 
@@ -505,7 +523,7 @@ func printRequestInfo(request *models.HttpRequest) {
 	fmt.Println()
 }
 
-func printDryRun(request *models.HttpRequest, cfg *config.Config) error {
+func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.Config) error {
 	formatter := output.NewFormatter(!noColor && cfg.ShowColors)
 
 	// Print header
@@ -545,6 +563,45 @@ func printDryRun(request *models.HttpRequest, cfg *config.Config) error {
 				fmt.Printf("  %s: %s\n", k, v)
 			} else {
 				fmt.Printf("  %s: %s\n", headerColor.Sprint(k), v)
+			}
+		}
+	}
+
+	// Print session cookies that would be sent
+	if !noSession && cfg.RememberCookies && !request.Metadata.NoCookieJar {
+		sessionMgr, err := session.NewSessionManager("", httpFilePath, sessionName)
+		if err == nil {
+			if err := sessionMgr.Load(); err == nil {
+				// Parse URL to get host
+				parsedURL, err := url.Parse(request.URL)
+				if err == nil {
+					cookies := sessionMgr.GetCookiesForURL(parsedURL.String())
+					if len(cookies) > 0 {
+						fmt.Println()
+						fmt.Println("Session Cookies (from previous requests):")
+						for _, cookie := range cookies {
+							if noColor || !cfg.ShowColors {
+								fmt.Printf("  %s = %s\n", cookie.Name, cookie.Value)
+							} else {
+								fmt.Printf("  %s = %s\n", headerColor.Sprint(cookie.Name), cookie.Value)
+							}
+						}
+					}
+				}
+
+				// Print session variables
+				vars := sessionMgr.GetAllVariables()
+				if len(vars) > 0 {
+					fmt.Println()
+					fmt.Println("Session Variables:")
+					for k, v := range vars {
+						if noColor || !cfg.ShowColors {
+							fmt.Printf("  %s = %s\n", k, v)
+						} else {
+							fmt.Printf("  %s = %s\n", headerColor.Sprint(k), v)
+						}
+					}
+				}
 			}
 		}
 	}

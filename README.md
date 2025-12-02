@@ -203,7 +203,7 @@ restclient env show production
 
 ### history
 
-View and manage request history.
+View and manage request history. History stores the exact request that was sent, including all headers (such as cookies from the session), so `replay` reproduces the original request exactly.
 
 ```bash
 restclient history <subcommand> [args]
@@ -215,7 +215,7 @@ restclient history <subcommand> [args]
 | `list` | List recent requests |
 | `show <index>` | Show details of a specific request |
 | `search <query>` | Search request history |
-| `replay <index>` | Replay a request from history |
+| `replay <index>` | Replay a request exactly as it was sent |
 | `stats` | Show history statistics |
 | `clear` | Clear all history |
 
@@ -240,7 +240,7 @@ restclient history list --all
 # Search history
 restclient history search "api.example.com"
 
-# Replay a request
+# Replay a request (sends exact same request including cookies)
 restclient history replay 0
 
 # View statistics
