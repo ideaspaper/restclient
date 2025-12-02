@@ -2,6 +2,27 @@
 
 A powerful command-line HTTP client inspired by the [VS Code REST Client](https://marketplace.visualstudio.com/items?itemName=humao.rest-client) extension. Send HTTP requests directly from `.http` and `.rest` files, manage environments, and more.
 
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Commands](#commands)
+  - [send](#send)
+  - [env](#env)
+  - [history](#history)
+  - [session](#session)
+  - [completion](#completion)
+  - [postman](#postman)
+- [HTTP File Format](#http-file-format)
+- [Variables](#variables)
+- [Scripting](#scripting)
+- [Authentication](#authentication)
+- [Configuration](#configuration)
+- [Global Flags](#global-flags)
+- [Examples](#examples)
+- [Troubleshooting](#troubleshooting)
+
 ## Features
 
 - Parse and execute requests from `.http` and `.rest` files
@@ -696,29 +717,24 @@ restclient supports JavaScript scripting for testing responses and sharing data 
 
 ### Session Persistence
 
-By default, restclient persists cookies and script variables (from `client.global.set()`) between CLI invocations. This enables:
+By default, restclient persists certain data between CLI invocations. Sessions are scoped by directory (based on the `.http` file location), so different projects have isolated sessions automatically.
 
-- **Cookie persistence**: Login once, subsequent requests use the session cookie
-- **Variable sharing**: Store tokens or IDs from one request, use in later requests
-- **Request chaining**: Build workflows across multiple CLI invocations
-
-Sessions are scoped by directory (based on the `.http` file location), so different projects have isolated sessions automatically.
+| Data Type                                 | Persisted? | Notes                         |
+| ----------------------------------------- | ---------- | ----------------------------- |
+| Cookies (`Set-Cookie` headers)            | Yes        | Automatic                     |
+| Script variables (`client.global.set()`)  | Yes        | Use scripts to store/retrieve |
+| File variables (`@var = value`)           | No         | Re-read each invocation       |
+| Request variables (`{{req.response...}}`) | No         | Single execution only         |
 
 ```bash
-# First invocation - login and store token
-restclient send api.http --name login
-# Script runs: client.global.set("authToken", response.body.token)
-
-# Second invocation - uses stored token
-restclient send api.http --name getProtected
-# Script runs: var token = client.global.get("authToken")
-
 # Use a named session for isolation
 restclient send api.http --session my-test
 
 # Disable session persistence
 restclient send api.http --no-session
 ```
+
+See [Chaining Requests with Global Variables](#chaining-requests-with-global-variables) for a complete example.
 
 ### Post-Response Scripts
 
