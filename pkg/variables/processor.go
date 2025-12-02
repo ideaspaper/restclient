@@ -38,7 +38,6 @@ type Variable struct {
 
 // VariableProcessor processes variables in request content
 type VariableProcessor struct {
-	providers      []VariableProvider
 	resolvedCache  map[string]string
 	fileVariables  map[string]string
 	environment    string
@@ -46,12 +45,6 @@ type VariableProcessor struct {
 	requestResults map[string]RequestResult
 	promptHandler  func(name, description string, isPassword bool) (string, error)
 	currentDir     string
-}
-
-// VariableProvider is an interface for variable providers
-type VariableProvider interface {
-	Has(name string) bool
-	Get(name string) (*Variable, error)
 }
 
 // RequestResult holds the result of a named request for request variables
@@ -517,12 +510,15 @@ func convertDateFormat(format string) string {
 	return result
 }
 
-// urlEncode performs percent-encoding
+// urlEncode performs RFC 3986 percent-encoding.
+// It encodes all characters except unreserved characters (A-Z, a-z, 0-9, -, _, ., ~).
+// This properly handles multi-byte UTF-8 characters by encoding each byte.
 func urlEncode(s string) string {
 	var builder strings.Builder
-	for _, c := range s {
-		if isURLSafe(byte(c)) {
-			builder.WriteRune(c)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if isURLSafe(c) {
+			builder.WriteByte(c)
 		} else {
 			builder.WriteString(fmt.Sprintf("%%%02X", c))
 		}
@@ -530,7 +526,7 @@ func urlEncode(s string) string {
 	return builder.String()
 }
 
-// isURLSafe checks if a character is safe for URLs
+// isURLSafe checks if a byte is an unreserved character per RFC 3986
 func isURLSafe(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~'

@@ -77,9 +77,13 @@ func NewHttpClient(config *ClientConfig) (*HttpClient, error) {
 		config = DefaultConfig()
 	}
 
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
+	var jar *cookiejar.Jar
+	if config.RememberCookies {
+		var err error
+		jar, err = cookiejar.New(nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create cookie jar: %w", err)
+		}
 	}
 
 	transport := &http.Transport{
@@ -115,7 +119,7 @@ func NewHttpClient(config *ClientConfig) (*HttpClient, error) {
 
 	client := &http.Client{
 		Transport: transport,
-		Jar:       jar,
+		Jar:       jar, // Will be nil if RememberCookies is false
 	}
 
 	if config.Timeout > 0 {
@@ -214,7 +218,11 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 		if strings.HasPrefix(strings.ToLower(authHeader), "digest ") {
 			// Retry with digest auth if we have credentials
 			if digestResp, err := c.handleDigestAuth(ctx, request, resp, authHeader); err == nil {
+				// Close the original response body before replacing
+				resp.Body.Close()
 				resp = digestResp
+				// Note: the new response body will be closed by the defer above
+				// since we reassigned resp
 			}
 		}
 	}
@@ -435,7 +443,7 @@ func buildDigestResponse(username, password, method, uri string, challenge diges
 			fmt.Sprintf(`realm="%s"`, challenge.realm),
 			fmt.Sprintf(`nonce="%s"`, challenge.nonce),
 			fmt.Sprintf(`uri="%s"`, uri),
-			fmt.Sprintf(`qop=auth`),
+			`qop=auth`,
 			fmt.Sprintf(`nc=%s`, nc),
 			fmt.Sprintf(`cnonce="%s"`, cnonce),
 			fmt.Sprintf(`response="%s"`, response),
@@ -680,9 +688,11 @@ func generateNonce() string {
 
 // ClearCookies clears all stored cookies
 func (c *HttpClient) ClearCookies() {
-	jar, _ := cookiejar.New(nil)
-	c.cookieJar = jar
-	c.client.Jar = jar
+	if c.config.RememberCookies {
+		jar, _ := cookiejar.New(nil)
+		c.cookieJar = jar
+		c.client.Jar = jar
+	}
 }
 
 // createMultipartBody creates a multipart form body from parts

@@ -100,7 +100,9 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 			// Check if it looks like a script file path (ends with .js)
 			if strings.HasSuffix(scriptPath, ".js") {
 				content, err := p.readFileContent(scriptPath, "")
-				if err == nil {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to read pre-request script file '%s': %v\n", scriptPath, err)
+				} else {
 					preScriptLines = append(preScriptLines, content)
 				}
 				continue
@@ -142,7 +144,9 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 			// Check if it looks like a script file path (ends with .js)
 			if strings.HasSuffix(scriptPath, ".js") {
 				content, err := p.readFileContent(scriptPath, "")
-				if err == nil {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to read post-response script file '%s': %v\n", scriptPath, err)
+				} else {
 					postScriptLines = append(postScriptLines, content)
 				}
 				state = ParseStatePostScript

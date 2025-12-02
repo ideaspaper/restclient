@@ -164,22 +164,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 	// Execute pre-request script BEFORE variable processing
 	// This allows scripts to set variables that can be used in the request
 	if request.Metadata.PreScript != "" {
-		scriptCtx := scripting.NewScriptContext()
-		scriptCtx.SetRequest(request)
-
-		// Copy environment variables to script context
-		if cfg.EnvironmentVariables != nil {
-			if shared, ok := cfg.EnvironmentVariables["$shared"]; ok {
-				for k, v := range shared {
-					scriptCtx.SetEnvVar(k, v)
-				}
-			}
-			if current, ok := cfg.EnvironmentVariables[cfg.CurrentEnvironment]; ok {
-				for k, v := range current {
-					scriptCtx.SetEnvVar(k, v)
-				}
-			}
-		}
+		scriptCtx := setupScriptContext(cfg, request, nil)
 
 		engine := scripting.NewEngine()
 		result, err := engine.Execute(request.Metadata.PreScript, scriptCtx)
@@ -196,13 +181,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 		}
 
 		// Apply global variables set by script to variable processor
-		for k, v := range result.GlobalVars {
-			if strVal, ok := v.(string); ok {
-				varProcessor.SetFileVariables(map[string]string{k: strVal})
-			} else {
-				varProcessor.SetFileVariables(map[string]string{k: fmt.Sprintf("%v", v)})
-			}
-		}
+		applyScriptGlobalVars(varProcessor, result.GlobalVars)
 	}
 
 	// Process variables in URL, headers, and body
@@ -241,6 +220,11 @@ func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *
 	// Handle per-request no-redirect
 	if request.Metadata.NoRedirect {
 		clientCfg.FollowRedirects = false
+	}
+
+	// Handle per-request no-cookie-jar
+	if request.Metadata.NoCookieJar {
+		clientCfg.RememberCookies = false
 	}
 
 	httpClient, err := client.NewHttpClient(clientCfg)
@@ -282,23 +266,7 @@ func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *
 
 	// Execute post-response script if present
 	if request.Metadata.PostScript != "" {
-		scriptCtx := scripting.NewScriptContext()
-		scriptCtx.SetRequest(request)
-		scriptCtx.SetResponse(resp)
-
-		// Copy environment variables to script context
-		if cfg.EnvironmentVariables != nil {
-			if shared, ok := cfg.EnvironmentVariables["$shared"]; ok {
-				for k, v := range shared {
-					scriptCtx.SetEnvVar(k, v)
-				}
-			}
-			if current, ok := cfg.EnvironmentVariables[cfg.CurrentEnvironment]; ok {
-				for k, v := range current {
-					scriptCtx.SetEnvVar(k, v)
-				}
-			}
-		}
+		scriptCtx := setupScriptContext(cfg, request, resp)
 
 		engine := scripting.NewEngine()
 		result, err := engine.Execute(request.Metadata.PostScript, scriptCtx)
@@ -318,13 +286,7 @@ func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *
 		}
 
 		// Apply global variables set by script to variable processor
-		for k, v := range result.GlobalVars {
-			if strVal, ok := v.(string); ok {
-				varProcessor.SetFileVariables(map[string]string{k: strVal})
-			} else {
-				varProcessor.SetFileVariables(map[string]string{k: fmt.Sprintf("%v", v)})
-			}
-		}
+		applyScriptGlobalVars(varProcessor, result.GlobalVars)
 
 		// Check for script errors after processing
 		if result.Error != nil {
@@ -362,6 +324,43 @@ func printTestResults(tests []scripting.TestResult, useColors bool) {
 			} else {
 				fmt.Printf("  [FAIL] %s: %s\n", test.Name, test.Error)
 			}
+		}
+	}
+}
+
+// setupScriptContext creates a script context with environment variables from config
+func setupScriptContext(cfg *config.Config, request *models.HttpRequest, resp *models.HttpResponse) *scripting.ScriptContext {
+	scriptCtx := scripting.NewScriptContext()
+	scriptCtx.SetRequest(request)
+
+	if resp != nil {
+		scriptCtx.SetResponse(resp)
+	}
+
+	// Copy environment variables to script context
+	if cfg.EnvironmentVariables != nil {
+		if shared, ok := cfg.EnvironmentVariables["$shared"]; ok {
+			for k, v := range shared {
+				scriptCtx.SetEnvVar(k, v)
+			}
+		}
+		if current, ok := cfg.EnvironmentVariables[cfg.CurrentEnvironment]; ok {
+			for k, v := range current {
+				scriptCtx.SetEnvVar(k, v)
+			}
+		}
+	}
+
+	return scriptCtx
+}
+
+// applyScriptGlobalVars applies global variables from script result to variable processor
+func applyScriptGlobalVars(varProcessor *variables.VariableProcessor, globalVars map[string]interface{}) {
+	for k, v := range globalVars {
+		if strVal, ok := v.(string); ok {
+			varProcessor.SetFileVariables(map[string]string{k: strVal})
+		} else {
+			varProcessor.SetFileVariables(map[string]string{k: fmt.Sprintf("%v", v)})
 		}
 	}
 }
