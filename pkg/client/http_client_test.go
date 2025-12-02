@@ -1,10 +1,14 @@
 package client
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -476,5 +480,487 @@ func TestBuildDigestResponse(t *testing.T) {
 	}
 	if !strings.Contains(response, `response="`) {
 		t.Error("Response should contain response hash")
+	}
+}
+
+func TestInvalidProxyURL(t *testing.T) {
+	config := &ClientConfig{
+		Proxy: "://invalid-proxy-url",
+	}
+
+	_, err := NewHttpClient(config)
+	if err == nil {
+		t.Error("NewHttpClient() should return error for invalid proxy URL")
+	}
+	if !strings.Contains(err.Error(), "invalid proxy URL") {
+		t.Errorf("Error should mention invalid proxy URL, got: %v", err)
+	}
+}
+
+func TestValidProxyURL(t *testing.T) {
+	config := &ClientConfig{
+		Proxy: "http://proxy.example.com:8080",
+	}
+
+	client, err := NewHttpClient(config)
+	if err != nil {
+		t.Fatalf("NewHttpClient() error = %v", err)
+	}
+	if client == nil {
+		t.Fatal("NewHttpClient() returned nil client")
+	}
+}
+
+// TestDigestAuth tests the full digest authentication flow
+func TestDigestAuth(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		auth := r.Header.Get("Authorization")
+
+		if requestCount == 1 {
+			// First request: no auth or invalid auth, return 401 with challenge
+			if auth == "" || !strings.HasPrefix(auth, "Digest ") {
+				w.Header().Set("WWW-Authenticate", `Digest realm="test@realm", nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093", qop="auth", algorithm=MD5`)
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
+
+		// Second request (or first with valid auth): verify digest auth
+		if strings.HasPrefix(auth, "Digest ") {
+			// Verify required digest fields are present
+			if !strings.Contains(auth, "username=") ||
+				!strings.Contains(auth, "realm=") ||
+				!strings.Contains(auth, "nonce=") ||
+				!strings.Contains(auth, "response=") {
+				t.Error("Digest auth missing required fields")
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("authenticated"))
+			return
+		}
+
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("GET", server.URL+"/protected", map[string]string{
+		"Authorization": "Digest user password",
+	}, nil, "", "")
+
+	resp, err := client.Send(req)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %v, want 200", resp.StatusCode)
+	}
+}
+
+// TestDigestAuthWithBody tests digest auth retry preserves request body
+func TestDigestAuthWithBody(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+
+		if requestCount == 1 {
+			w.Header().Set("WWW-Authenticate", `Digest realm="test", nonce="abc123", qop="auth"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		// Verify body is present on retry
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "test-data") {
+			t.Errorf("Body not preserved on retry, got: %s", string(body))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("POST", server.URL+"/protected", map[string]string{
+		"Authorization": "Digest user password",
+		"Content-Type":  "text/plain",
+	}, strings.NewReader("test-data"), "test-data", "")
+
+	resp, err := client.Send(req)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %v, want 200", resp.StatusCode)
+	}
+}
+
+// TestMultipartFormData tests sending multipart/form-data requests
+func TestMultipartFormData(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contentType := r.Header.Get("Content-Type")
+		if !strings.Contains(contentType, "multipart/form-data") {
+			t.Errorf("Content-Type = %v, want multipart/form-data", contentType)
+		}
+
+		err := r.ParseMultipartForm(10 << 20)
+		if err != nil {
+			t.Fatalf("ParseMultipartForm error: %v", err)
+		}
+
+		// Check text field
+		if r.FormValue("name") != "test-name" {
+			t.Errorf("name field = %v, want test-name", r.FormValue("name"))
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("POST", server.URL+"/upload", map[string]string{}, nil, "", "")
+	req.MultipartParts = []models.MultipartPart{
+		{Name: "name", Value: "test-name", IsFile: false},
+	}
+
+	resp, err := client.Send(req)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %v, want 200", resp.StatusCode)
+	}
+}
+
+// TestMultipartFileUpload tests uploading a file via multipart/form-data
+func TestMultipartFileUpload(t *testing.T) {
+	// Create a temporary file to upload
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "test-upload.txt")
+	testContent := "This is test file content"
+	if err := os.WriteFile(tmpFile, []byte(testContent), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		err := r.ParseMultipartForm(10 << 20)
+		if err != nil {
+			t.Fatalf("ParseMultipartForm error: %v", err)
+		}
+
+		file, header, err := r.FormFile("document")
+		if err != nil {
+			t.Fatalf("FormFile error: %v", err)
+		}
+		defer file.Close()
+
+		if header.Filename != "test-upload.txt" {
+			t.Errorf("Filename = %v, want test-upload.txt", header.Filename)
+		}
+
+		content, _ := io.ReadAll(file)
+		if string(content) != testContent {
+			t.Errorf("File content = %v, want %v", string(content), testContent)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("POST", server.URL+"/upload", map[string]string{}, nil, "", "")
+	req.MultipartParts = []models.MultipartPart{
+		{Name: "document", FilePath: tmpFile, IsFile: true},
+	}
+
+	resp, err := client.Send(req)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %v, want 200", resp.StatusCode)
+	}
+}
+
+// TestMultipartWithCustomContentType tests file upload with explicit content type
+func TestMultipartWithCustomContentType(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "data.json")
+	if err := os.WriteFile(tmpFile, []byte(`{"key": "value"}`), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		err := r.ParseMultipartForm(10 << 20)
+		if err != nil {
+			t.Fatalf("ParseMultipartForm error: %v", err)
+		}
+
+		file, header, err := r.FormFile("config")
+		if err != nil {
+			t.Fatalf("FormFile error: %v", err)
+		}
+		defer file.Close()
+
+		// Check that custom content type was set
+		if header.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("Content-Type = %v, want application/json", header.Header.Get("Content-Type"))
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("POST", server.URL+"/upload", map[string]string{}, nil, "", "")
+	req.MultipartParts = []models.MultipartPart{
+		{Name: "config", FilePath: tmpFile, IsFile: true, ContentType: "application/json"},
+	}
+
+	resp, err := client.Send(req)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %v, want 200", resp.StatusCode)
+	}
+}
+
+// TestMultipartFileNotFound tests error handling when file doesn't exist
+func TestMultipartFileNotFound(t *testing.T) {
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("POST", "http://example.com/upload", map[string]string{}, nil, "", "")
+	req.MultipartParts = []models.MultipartPart{
+		{Name: "file", FilePath: "/nonexistent/file.txt", IsFile: true},
+	}
+
+	_, err := client.Send(req)
+	if err == nil {
+		t.Error("Send() should return error for nonexistent file")
+	}
+	if !strings.Contains(err.Error(), "failed to open file") {
+		t.Errorf("Error should mention failed to open file, got: %v", err)
+	}
+}
+
+// TestGzipResponseDecoding tests automatic gzip response decompression
+func TestGzipResponseDecoding(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Type", "application/json")
+
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		gz.Write([]byte(`{"message": "compressed"}`))
+		gz.Close()
+
+		w.Write(buf.Bytes())
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("GET", server.URL+"/gzip", make(map[string]string), nil, "", "")
+
+	resp, err := client.Send(req)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	if !strings.Contains(resp.Body, "compressed") {
+		t.Errorf("Body = %v, want to contain 'compressed'", resp.Body)
+	}
+}
+
+// TestBasicAuthAlreadyEncoded tests that pre-encoded basic auth is used as-is
+func TestBasicAuthAlreadyEncoded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		expected := "Basic " + base64.StdEncoding.EncodeToString([]byte("user:pass"))
+		if auth != expected {
+			t.Errorf("Authorization = %v, want %v", auth, expected)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	// Send pre-encoded credentials
+	encoded := base64.StdEncoding.EncodeToString([]byte("user:pass"))
+	req := models.NewHttpRequest("GET", server.URL+"/test", map[string]string{
+		"Authorization": "Basic " + encoded,
+	}, nil, "", "")
+
+	_, err := client.Send(req)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+}
+
+// TestBasicAuthSeparateUsernamePassword tests "Basic username password" format
+func TestBasicAuthSeparateUsernamePassword(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Basic ") {
+			t.Errorf("Authorization should start with 'Basic '")
+			return
+		}
+		encoded := strings.TrimPrefix(auth, "Basic ")
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Errorf("Failed to decode: %v", err)
+			return
+		}
+		if string(decoded) != "myuser:mypass" {
+			t.Errorf("Decoded = %v, want 'myuser:mypass'", string(decoded))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("GET", server.URL+"/test", map[string]string{
+		"Authorization": "Basic myuser mypass",
+	}, nil, "", "")
+
+	_, err := client.Send(req)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+}
+
+// TestProxyExclusion tests that excluded hosts bypass the proxy
+func TestProxyExclusion(t *testing.T) {
+	// We can't easily test actual proxy behavior without a proxy server,
+	// but we can test that the config is accepted and client is created
+	config := &ClientConfig{
+		Proxy:        "http://proxy.example.com:8080",
+		ExcludeProxy: []string{"localhost", "internal.company.com"},
+	}
+
+	client, err := NewHttpClient(config)
+	if err != nil {
+		t.Fatalf("NewHttpClient() error = %v", err)
+	}
+	if client == nil {
+		t.Fatal("NewHttpClient() returned nil")
+	}
+}
+
+// TestTimeoutConfig tests that timeout is properly configured
+func TestTimeoutConfig(t *testing.T) {
+	config := &ClientConfig{
+		Timeout: 5000000000, // 5 seconds in nanoseconds
+	}
+
+	client, err := NewHttpClient(config)
+	if err != nil {
+		t.Fatalf("NewHttpClient() error = %v", err)
+	}
+	if client.client.Timeout != config.Timeout {
+		t.Errorf("Timeout = %v, want %v", client.client.Timeout, config.Timeout)
+	}
+}
+
+// TestInsecureSSLConfig tests that InsecureSSL config is accepted
+func TestInsecureSSLConfig(t *testing.T) {
+	config := &ClientConfig{
+		InsecureSSL: true,
+	}
+
+	client, err := NewHttpClient(config)
+	if err != nil {
+		t.Fatalf("NewHttpClient() error = %v", err)
+	}
+	if client == nil {
+		t.Fatal("NewHttpClient() returned nil")
+	}
+}
+
+// TestNoCookieJar tests client without cookie jar
+func TestNoCookieJar(t *testing.T) {
+	config := &ClientConfig{
+		RememberCookies: false,
+	}
+
+	client, err := NewHttpClient(config)
+	if err != nil {
+		t.Fatalf("NewHttpClient() error = %v", err)
+	}
+	if client.cookieJar != nil {
+		t.Error("Cookie jar should be nil when RememberCookies is false")
+	}
+}
+
+// TestBuildDigestResponseWithoutQop tests digest without qop (older servers)
+func TestBuildDigestResponseWithoutQop(t *testing.T) {
+	challenge := digestChallenge{
+		realm:     "test-realm",
+		nonce:     "abc123",
+		qop:       "", // No qop
+		algorithm: "MD5",
+	}
+
+	response := buildDigestResponse("user", "pass", "GET", "/resource", challenge)
+
+	// Without qop, response should not contain nc or cnonce
+	if strings.Contains(response, "nc=") {
+		t.Error("Response without qop should not contain nc")
+	}
+	if strings.Contains(response, "cnonce=") {
+		t.Error("Response without qop should not contain cnonce")
+	}
+	if !strings.Contains(response, `response="`) {
+		t.Error("Response should contain response hash")
+	}
+}
+
+// TestBuildDigestResponseMD5Sess tests MD5-sess algorithm variant
+func TestBuildDigestResponseMD5Sess(t *testing.T) {
+	challenge := digestChallenge{
+		realm:     "test-realm",
+		nonce:     "abc123",
+		qop:       "auth",
+		algorithm: "MD5-sess",
+		opaque:    "opaque-value",
+	}
+
+	response := buildDigestResponse("user", "pass", "GET", "/resource", challenge)
+
+	if !strings.Contains(response, `algorithm=MD5-sess`) {
+		t.Error("Response should contain algorithm=MD5-sess")
+	}
+	if !strings.Contains(response, `opaque="opaque-value"`) {
+		t.Error("Response should contain opaque value")
+	}
+}
+
+// TestRequestWithQueryString tests requests with query parameters
+func TestRequestWithQueryString(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("foo") != "bar" {
+			t.Errorf("Query param foo = %v, want bar", r.URL.Query().Get("foo"))
+		}
+		if r.URL.Query().Get("num") != "123" {
+			t.Errorf("Query param num = %v, want 123", r.URL.Query().Get("num"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("GET", server.URL+"/test?foo=bar&num=123", make(map[string]string), nil, "", "")
+
+	resp, err := client.Send(req)
+	if err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %v, want 200", resp.StatusCode)
 	}
 }

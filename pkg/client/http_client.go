@@ -103,17 +103,18 @@ func NewHttpClient(config *ClientConfig) (*HttpClient, error) {
 	// Configure proxy
 	if config.Proxy != "" {
 		proxyURL, err := url.Parse(config.Proxy)
-		if err == nil {
-			transport.Proxy = func(req *http.Request) (*url.URL, error) {
-				// Check excluded hosts
-				for _, exclude := range config.ExcludeProxy {
-					if strings.EqualFold(req.URL.Host, exclude) ||
-						strings.HasSuffix(strings.ToLower(req.URL.Host), "."+strings.ToLower(exclude)) {
-						return nil, nil
-					}
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxy URL %q: %w", config.Proxy, err)
+		}
+		transport.Proxy = func(req *http.Request) (*url.URL, error) {
+			// Check excluded hosts
+			for _, exclude := range config.ExcludeProxy {
+				if strings.EqualFold(req.URL.Host, exclude) ||
+					strings.HasSuffix(strings.ToLower(req.URL.Host), "."+strings.ToLower(exclude)) {
+					return nil, nil
 				}
-				return proxyURL, nil
 			}
+			return proxyURL, nil
 		}
 	}
 
@@ -223,6 +224,9 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 				resp = digestResp
 				// Note: the new response body will be closed by the defer above
 				// since we reassigned resp
+			} else if _, hasCredentials := c.digestCreds[request.URL]; hasCredentials {
+				// Log warning if retry failed but credentials were provided
+				fmt.Fprintf(os.Stderr, "Warning: digest auth retry failed: %v\n", err)
 			}
 		}
 	}
@@ -360,9 +364,17 @@ func (c *HttpClient) handleDigestAuth(ctx context.Context, request *models.HttpR
 	// Update request with digest auth
 	updateAuthHeader(request, "Digest "+digestAuth)
 
-	// Resend request
+	// Resend request - handle both regular body and multipart
 	var bodyReader io.Reader
-	if request.RawBody != "" {
+	var contentType string
+
+	if len(request.MultipartParts) > 0 {
+		var err error
+		bodyReader, contentType, err = c.createMultipartBody(request.MultipartParts)
+		if err != nil {
+			return resp, fmt.Errorf("failed to create multipart body for digest retry: %w", err)
+		}
+	} else if request.RawBody != "" {
 		bodyReader = strings.NewReader(request.RawBody)
 	}
 
@@ -373,6 +385,11 @@ func (c *HttpClient) handleDigestAuth(ctx context.Context, request *models.HttpR
 
 	for k, v := range request.Headers {
 		req.Header.Set(k, v)
+	}
+
+	// Override Content-Type for multipart if we generated it
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	return c.client.Do(req)
