@@ -1,10 +1,50 @@
 package models
 
 import (
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
 )
+
+// ValidationError represents a request validation error
+type ValidationError struct {
+	Field   string // Field that failed validation (e.g., "URL", "Header:Content-Type")
+	Message string // Description of the validation error
+}
+
+func (e ValidationError) Error() string {
+	return fmt.Sprintf("%s: %s", e.Field, e.Message)
+}
+
+// ValidationResult contains all validation errors for a request
+type ValidationResult struct {
+	Errors []ValidationError
+}
+
+// IsValid returns true if there are no validation errors
+func (v *ValidationResult) IsValid() bool {
+	return len(v.Errors) == 0
+}
+
+// AddError adds a validation error to the result
+func (v *ValidationResult) AddError(field, message string) {
+	v.Errors = append(v.Errors, ValidationError{Field: field, Message: message})
+}
+
+// Error returns a combined error message for all validation errors
+func (v *ValidationResult) Error() string {
+	if v.IsValid() {
+		return ""
+	}
+	var msgs []string
+	for _, err := range v.Errors {
+		msgs = append(msgs, err.Error())
+	}
+	return strings.Join(msgs, "; ")
+}
 
 // HttpRequest represents an HTTP request
 type HttpRequest struct {
@@ -82,6 +122,122 @@ func (r *HttpRequest) ToStdRequest() (*http.Request, error) {
 	}
 
 	return req, nil
+}
+
+// validMethods contains all valid HTTP methods
+var validMethods = map[string]bool{
+	"GET": true, "POST": true, "PUT": true, "DELETE": true,
+	"PATCH": true, "HEAD": true, "OPTIONS": true, "CONNECT": true,
+	"TRACE": true, "LOCK": true, "UNLOCK": true, "PROPFIND": true,
+	"PROPPATCH": true, "COPY": true, "MOVE": true, "MKCOL": true,
+	"MKCALENDAR": true, "ACL": true, "SEARCH": true,
+}
+
+// headerNameRegex validates header names (RFC 7230)
+var headerNameRegex = regexp.MustCompile(`^[!#$%&'*+\-.^_` + "`" + `|~0-9A-Za-z]+$`)
+
+// Validate validates the HTTP request and returns any validation errors
+func (r *HttpRequest) Validate() *ValidationResult {
+	result := &ValidationResult{}
+
+	// Validate method
+	if r.Method == "" {
+		result.AddError("Method", "method is required")
+	} else if !validMethods[strings.ToUpper(r.Method)] {
+		result.AddError("Method", fmt.Sprintf("invalid HTTP method: %s", r.Method))
+	}
+
+	// Validate URL
+	r.validateURL(result)
+
+	// Validate headers
+	r.validateHeaders(result)
+
+	return result
+}
+
+// validateURL validates the request URL
+func (r *HttpRequest) validateURL(result *ValidationResult) {
+	if r.URL == "" {
+		result.AddError("URL", "URL is required")
+		return
+	}
+
+	// Check for unresolved variables (common mistake)
+	if strings.Contains(r.URL, "{{") && strings.Contains(r.URL, "}}") {
+		result.AddError("URL", "URL contains unresolved variables (check your environment configuration)")
+		return
+	}
+
+	// Parse and validate URL
+	parsedURL, err := url.Parse(r.URL)
+	if err != nil {
+		result.AddError("URL", fmt.Sprintf("invalid URL: %v", err))
+		return
+	}
+
+	// Check for scheme
+	if parsedURL.Scheme == "" {
+		result.AddError("URL", "URL must include scheme (http:// or https://)")
+		return
+	}
+
+	// Validate scheme
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme != "http" && scheme != "https" {
+		result.AddError("URL", fmt.Sprintf("unsupported URL scheme: %s (use http or https)", parsedURL.Scheme))
+		return
+	}
+
+	// Check for host
+	if parsedURL.Host == "" {
+		result.AddError("URL", "URL must include a host")
+		return
+	}
+
+	// Check for spaces in URL (common mistake)
+	if strings.Contains(r.URL, " ") {
+		result.AddError("URL", "URL contains spaces (URLs should be properly encoded)")
+	}
+}
+
+// validateHeaders validates request headers
+func (r *HttpRequest) validateHeaders(result *ValidationResult) {
+	for name, value := range r.Headers {
+		// Validate header name
+		if name == "" {
+			result.AddError("Header", "header name cannot be empty")
+			continue
+		}
+
+		// Check for valid header name characters (RFC 7230)
+		if !headerNameRegex.MatchString(name) {
+			result.AddError(fmt.Sprintf("Header:%s", name), "header name contains invalid characters")
+		}
+
+		// Check for unresolved variables in header value
+		if strings.Contains(value, "{{") && strings.Contains(value, "}}") {
+			result.AddError(fmt.Sprintf("Header:%s", name), "header value contains unresolved variables")
+		}
+
+		// Validate specific headers
+		lowerName := strings.ToLower(name)
+		switch lowerName {
+		case "content-type":
+			if value == "" {
+				result.AddError("Header:Content-Type", "Content-Type header is empty")
+			}
+		case "authorization":
+			// Check for placeholder values
+			lowerValue := strings.ToLower(value)
+			if strings.Contains(lowerValue, "your-token") ||
+				strings.Contains(lowerValue, "your_token") ||
+				strings.Contains(lowerValue, "<token>") ||
+				strings.Contains(lowerValue, "[token]") {
+				result.AddError("Header:Authorization", "Authorization header appears to contain a placeholder value")
+			}
+		}
+	}
 }
 
 // HistoricalHttpRequest represents a saved request in history

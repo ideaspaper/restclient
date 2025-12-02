@@ -22,11 +22,25 @@ const (
 	ParseStatePostScript
 )
 
+// ParseWarning represents a warning generated during parsing
+type ParseWarning struct {
+	BlockIndex int    // Index of the block (0-based)
+	Line       int    // Line number within the block (0-based)
+	Message    string // Warning message
+}
+
+// ParseResult contains the parsed requests and any warnings
+type ParseResult struct {
+	Requests []*models.HttpRequest
+	Warnings []ParseWarning
+}
+
 // HttpRequestParser parses HTTP request files (.http, .rest)
 type HttpRequestParser struct {
 	content        string
 	defaultHeaders map[string]string
 	baseDir        string
+	warnings       []ParseWarning
 }
 
 // NewHttpRequestParser creates a new parser
@@ -40,30 +54,51 @@ func NewHttpRequestParser(content string, defaultHeaders map[string]string, base
 		content:        content,
 		defaultHeaders: defaultHeaders,
 		baseDir:        baseDir,
+		warnings:       []ParseWarning{},
 	}
+}
+
+// addWarning adds a warning to the parser's warning list
+func (p *HttpRequestParser) addWarning(blockIndex, line int, message string) {
+	p.warnings = append(p.warnings, ParseWarning{
+		BlockIndex: blockIndex,
+		Line:       line,
+		Message:    message,
+	})
 }
 
 // RequestDelimiter is used to separate multiple requests in one file
 const RequestDelimiter = "###"
 
-// ParseAll parses all requests from the content
+// ParseAll parses all requests from the content (backward compatible - ignores warnings)
 func (p *HttpRequestParser) ParseAll() ([]*models.HttpRequest, error) {
+	result := p.ParseAllWithWarnings()
+	return result.Requests, nil
+}
+
+// ParseAllWithWarnings parses all requests and returns warnings for invalid blocks
+func (p *HttpRequestParser) ParseAllWithWarnings() *ParseResult {
 	blocks := splitRequestBlocks(p.content)
 	var requests []*models.HttpRequest
+	p.warnings = []ParseWarning{} // Reset warnings
 
-	for _, block := range blocks {
+	for i, block := range blocks {
 		if strings.TrimSpace(block) == "" {
 			continue
 		}
 		req, err := p.ParseRequest(block)
 		if err != nil {
-			// Skip invalid blocks
+			// Collect warning instead of silently skipping
+			p.addWarning(i, 0, fmt.Sprintf("skipped invalid request block: %v", err))
 			continue
 		}
 		requests = append(requests, req)
 	}
 
-	return requests, nil
+	return &ParseResult{
+		Requests: requests,
+		Warnings: p.warnings,
+	}
 }
 
 // splitRequestBlocks splits content by ### delimiter
@@ -746,6 +781,18 @@ func ParseFile(filePath string, defaultHeaders map[string]string) ([]*models.Htt
 	baseDir := filepath.Dir(filePath)
 	parser := NewHttpRequestParser(string(content), defaultHeaders, baseDir)
 	return parser.ParseAll()
+}
+
+// ParseFileWithWarnings parses an HTTP request file and returns warnings
+func ParseFileWithWarnings(filePath string, defaultHeaders map[string]string) (*ParseResult, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	baseDir := filepath.Dir(filePath)
+	parser := NewHttpRequestParser(string(content), defaultHeaders, baseDir)
+	return parser.ParseAllWithWarnings(), nil
 }
 
 // ParseFileAt parses a specific request from a file (by index)

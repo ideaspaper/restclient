@@ -115,6 +115,7 @@ restclient send <file.http> [flags]
 | `--output` | `-o` | Save response body to file |
 | `--no-history` | | Don't save request to history |
 | `--dry-run` | | Preview request without sending |
+| `--skip-validate` | | Skip request validation |
 
 **Examples:**
 
@@ -947,7 +948,7 @@ Configuration is stored in `~/.restclient/config.json`:
 | ------------ | ----- | ---------------------- |
 | `--config`   | `-c`  | Config file path       |
 | `--env`      | `-e`  | Environment to use     |
-| `--verbose`  | `-v`  | Verbose output         |
+| `--verbose`  | `-v`  | Verbose output (includes parsing warnings) |
 | `--no-color` |       | Disable colored output |
 | `--version`  |       | Show version           |
 | `--help`     | `-h`  | Show help              |
@@ -1055,6 +1056,46 @@ GET https://api.example.com
 1. Check if the variable is defined in file variables or environment
 2. Verify the current environment with `restclient env current`
 3. Check variable spelling (case-sensitive)
+
+### Request Validation Errors
+
+restclient validates requests before sending to catch common issues early. If validation fails, you'll see errors like:
+
+```
+Request validation failed:
+  - URL: URL contains unresolved variables (check your environment configuration)
+  - Header:Authorization: header value contains unresolved variables
+```
+
+**Common validation errors:**
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `URL is required` | Empty URL | Ensure request has a valid URL |
+| `URL must include scheme` | Missing `http://` or `https://` | Add scheme to URL |
+| `URL contains unresolved variables` | Variables like `{{baseUrl}}` not resolved | Check environment variables and spelling |
+| `header value contains unresolved variables` | Header has `{{variable}}` syntax | Ensure variable is defined |
+| `Authorization header appears to contain a placeholder` | Auth header has `your-token` or similar | Replace placeholder with actual token |
+| `URL contains spaces` | Spaces in URL not encoded | URL-encode spaces as `%20` |
+
+**Bypassing validation:**
+
+If you need to send a request with validation issues (e.g., testing error handling), use `--skip-validate`:
+
+```bash
+restclient send api.http --skip-validate
+```
+
+### Parsing Warnings
+
+When using `--verbose`, restclient shows warnings for invalid request blocks that were skipped:
+
+```bash
+restclient send api.http --verbose
+# Warning: block 2: skipped invalid request block: no request line found
+```
+
+This helps identify issues in multi-request `.http` files where some blocks may be malformed.
 
 ### SSL Certificate Errors
 

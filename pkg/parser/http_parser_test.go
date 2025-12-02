@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -1153,5 +1154,144 @@ func TestExternalScriptFileSyntax(t *testing.T) {
 				t.Errorf("isExternalScript(%q) = %v, want %v", tt.line, got, tt.isScript)
 			}
 		})
+	}
+}
+
+func TestParseAllWithWarnings(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantRequests int
+		wantWarnings int
+	}{
+		{
+			name:         "single valid request",
+			input:        "GET https://api.example.com/users",
+			wantRequests: 1,
+			wantWarnings: 0,
+		},
+		{
+			name: "multiple valid requests",
+			input: `GET https://api.example.com/users
+
+###
+
+POST https://api.example.com/users
+Content-Type: application/json
+
+{"name": "John"}`,
+			wantRequests: 2,
+			wantWarnings: 0,
+		},
+		{
+			name: "one valid, one invalid",
+			input: `GET https://api.example.com/users
+
+###
+
+# Just a comment with no request`,
+			wantRequests: 1,
+			wantWarnings: 1,
+		},
+		{
+			name: "multiple invalid blocks",
+			input: `# Only comments here
+
+###
+
+// Another comment block
+
+###
+
+GET https://api.example.com/valid`,
+			wantRequests: 1,
+			wantWarnings: 2,
+		},
+		{
+			name:         "empty input",
+			input:        "",
+			wantRequests: 0,
+			wantWarnings: 0,
+		},
+		{
+			name:         "only separators",
+			input:        "###\n###\n###",
+			wantRequests: 0,
+			wantWarnings: 0, // Empty blocks are skipped, not warned about
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewHttpRequestParser(tt.input, nil, "")
+			result := parser.ParseAllWithWarnings()
+
+			if len(result.Requests) != tt.wantRequests {
+				t.Errorf("ParseAllWithWarnings() requests = %d, want %d", len(result.Requests), tt.wantRequests)
+			}
+			if len(result.Warnings) != tt.wantWarnings {
+				t.Errorf("ParseAllWithWarnings() warnings = %d, want %d", len(result.Warnings), tt.wantWarnings)
+			}
+		})
+	}
+}
+
+func TestParseWarningContent(t *testing.T) {
+	input := `GET https://api.example.com/users
+
+###
+
+# This block has no request line`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	result := parser.ParseAllWithWarnings()
+
+	if len(result.Warnings) != 1 {
+		t.Fatalf("Expected 1 warning, got %d", len(result.Warnings))
+	}
+
+	warning := result.Warnings[0]
+	if warning.BlockIndex != 1 {
+		t.Errorf("Warning BlockIndex = %d, want 1", warning.BlockIndex)
+	}
+	if !strings.Contains(warning.Message, "no request line found") {
+		t.Errorf("Warning Message should contain 'no request line found', got: %s", warning.Message)
+	}
+}
+
+func TestParseFileWithWarnings(t *testing.T) {
+	// Create a temp file with content
+	content := `GET https://api.example.com/users
+
+###
+
+# Invalid block - no request
+
+###
+
+POST https://api.example.com/data`
+
+	// Create temp file
+	tmpFile, err := os.CreateTemp("", "test*.http")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	result, err := ParseFileWithWarnings(tmpFile.Name(), nil)
+	if err != nil {
+		t.Fatalf("ParseFileWithWarnings() error = %v", err)
+	}
+
+	if len(result.Requests) != 2 {
+		t.Errorf("Expected 2 requests, got %d", len(result.Requests))
+	}
+	if len(result.Warnings) != 1 {
+		t.Errorf("Expected 1 warning, got %d", len(result.Warnings))
 	}
 }

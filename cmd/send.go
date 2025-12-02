@@ -32,6 +32,7 @@ var (
 	outputFile   string
 	noHistory    bool
 	dryRun       bool
+	skipValidate bool
 )
 
 // sendCmd represents the send command
@@ -76,6 +77,7 @@ func init() {
 	sendCmd.Flags().StringVarP(&outputFile, "output", "o", "", "save response body to file")
 	sendCmd.Flags().BoolVar(&noHistory, "no-history", false, "don't save request to history")
 	sendCmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview request without sending")
+	sendCmd.Flags().BoolVar(&skipValidate, "skip-validate", false, "skip request validation")
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -111,11 +113,22 @@ func runSend(cmd *cobra.Command, args []string) error {
 	varProcessor.SetCurrentDir(filepath.Dir(filePath))
 	varProcessor.SetPromptHandler(promptHandler)
 
-	// Parse requests
+	// Parse requests with warnings
 	httpParser := parser.NewHttpRequestParser(string(content), cfg.DefaultHeaders, filepath.Dir(filePath))
-	requests, err := httpParser.ParseAll()
-	if err != nil {
-		return fmt.Errorf("failed to parse file: %w", err)
+	parseResult := httpParser.ParseAllWithWarnings()
+	requests := parseResult.Requests
+
+	// Display parsing warnings in verbose mode
+	if verbose && len(parseResult.Warnings) > 0 {
+		warnColor := color.New(color.FgYellow)
+		for _, w := range parseResult.Warnings {
+			if noColor || !cfg.ShowColors {
+				fmt.Fprintf(os.Stderr, "Warning: block %d: %s\n", w.BlockIndex+1, w.Message)
+			} else {
+				warnColor.Fprintf(os.Stderr, "Warning: block %d: %s\n", w.BlockIndex+1, w.Message)
+			}
+		}
+		fmt.Fprintln(os.Stderr)
 	}
 
 	if len(requests) == 0 {
@@ -202,6 +215,23 @@ func runSend(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to process variables in body: %w", varErr)
 		}
 		request.Body = strings.NewReader(request.RawBody)
+	}
+
+	// Validate request before sending (unless --skip-validate is set)
+	if !skipValidate {
+		validation := request.Validate()
+		if !validation.IsValid() {
+			errColor := color.New(color.FgRed)
+			if noColor || !cfg.ShowColors {
+				fmt.Fprintln(os.Stderr, "Request validation failed:")
+			} else {
+				errColor.Fprintln(os.Stderr, "Request validation failed:")
+			}
+			for _, e := range validation.Errors {
+				fmt.Fprintf(os.Stderr, "  - %s: %s\n", e.Field, e.Message)
+			}
+			return fmt.Errorf("request validation failed: %s", validation.Error())
+		}
 	}
 
 	// Dry run - just print the request without sending
