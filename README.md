@@ -314,22 +314,6 @@ Generate shell completion scripts.
 restclient completion [bash|zsh|fish|powershell]
 ```
 
-**Setup:**
-
-```bash
-# Bash
-source <(restclient completion bash)
-
-# Zsh
-restclient completion zsh > "${fpath[1]}/_restclient"
-
-# Fish
-restclient completion fish > ~/.config/fish/completions/restclient.fish
-
-# PowerShell
-restclient completion powershell | Out-String | Invoke-Expression
-```
-
 ### postman
 
 Import and export Postman Collection v2.1.0 files.
