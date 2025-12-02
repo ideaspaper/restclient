@@ -20,6 +20,7 @@ import (
 	"github.com/ideaspaper/restclient/pkg/output"
 	"github.com/ideaspaper/restclient/pkg/parser"
 	"github.com/ideaspaper/restclient/pkg/scripting"
+	"github.com/ideaspaper/restclient/pkg/session"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
 
@@ -33,6 +34,8 @@ var (
 	noHistory    bool
 	dryRun       bool
 	skipValidate bool
+	sessionName  string
+	noSession    bool
 )
 
 // sendCmd represents the send command
@@ -78,6 +81,8 @@ func init() {
 	sendCmd.Flags().BoolVar(&noHistory, "no-history", false, "don't save request to history")
 	sendCmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview request without sending")
 	sendCmd.Flags().BoolVar(&skipValidate, "skip-validate", false, "skip request validation")
+	sendCmd.Flags().StringVar(&sessionName, "session", "", "use named session instead of directory-based session")
+	sendCmd.Flags().BoolVar(&noSession, "no-session", false, "don't load or save session state (cookies and variables)")
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -240,10 +245,37 @@ func runSend(cmd *cobra.Command, args []string) error {
 	}
 
 	// Send request
-	return sendRequest(request, cfg, varProcessor)
+	return sendRequest(filePath, request, cfg, varProcessor)
 }
 
-func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *variables.VariableProcessor) error {
+func sendRequest(httpFilePath string, request *models.HttpRequest, cfg *config.Config, varProcessor *variables.VariableProcessor) error {
+	// Initialize session manager (unless disabled)
+	var sessionMgr *session.SessionManager
+	if !noSession && cfg.RememberCookies {
+		var err error
+		sessionMgr, err = session.NewSessionManager("", httpFilePath, sessionName)
+		if err != nil {
+			// Non-fatal: just log warning and continue without session
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to initialize session: %v\n", err)
+			}
+		} else {
+			// Load existing session data
+			if err := sessionMgr.Load(); err != nil && verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to load session: %v\n", err)
+			}
+
+			// Inject session variables into variable processor
+			for name, value := range sessionMgr.GetAllVariables() {
+				if strVal, ok := value.(string); ok {
+					varProcessor.SetFileVariables(map[string]string{name: strVal})
+				} else {
+					varProcessor.SetFileVariables(map[string]string{name: fmt.Sprintf("%v", value)})
+				}
+			}
+		}
+	}
+
 	// Create HTTP client
 	clientCfg := cfg.ToClientConfig()
 
@@ -262,6 +294,14 @@ func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *
 		return fmt.Errorf("failed to create HTTP client: %w", err)
 	}
 
+	// Load cookies from session into HTTP client
+	if sessionMgr != nil && !request.Metadata.NoCookieJar {
+		cookies := sessionMgr.GetCookiesForURL(request.URL)
+		if len(cookies) > 0 {
+			httpClient.SetCookies(request.URL, cookies)
+		}
+	}
+
 	// Print request info if verbose
 	if verbose {
 		printRequestInfo(request)
@@ -271,6 +311,14 @@ func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *
 	resp, err := httpClient.Send(request)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
+	}
+
+	// Save cookies from response to session
+	if sessionMgr != nil && !request.Metadata.NoCookieJar {
+		responseCookies := httpClient.GetCookies(request.URL)
+		if len(responseCookies) > 0 {
+			sessionMgr.SetCookiesFromResponse(request.URL, responseCookies)
+		}
 	}
 
 	// Save to history if not disabled
@@ -298,6 +346,13 @@ func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *
 	if request.Metadata.PostScript != "" {
 		scriptCtx := setupScriptContext(cfg, request, resp)
 
+		// Load existing session variables into script context
+		if sessionMgr != nil {
+			for name, value := range sessionMgr.GetAllVariables() {
+				scriptCtx.SetGlobalVar(name, value)
+			}
+		}
+
 		engine := scripting.NewEngine()
 		result, err := engine.Execute(request.Metadata.PostScript, scriptCtx)
 		if err != nil {
@@ -318,6 +373,13 @@ func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *
 		// Apply global variables set by script to variable processor
 		applyScriptGlobalVars(varProcessor, result.GlobalVars)
 
+		// Save script globals to session
+		if sessionMgr != nil {
+			for name, value := range result.GlobalVars {
+				sessionMgr.SetVariable(name, value)
+			}
+		}
+
 		// Check for script errors after processing
 		if result.Error != nil {
 			return fmt.Errorf("post-response script failed: %w", result.Error)
@@ -328,6 +390,13 @@ func sendRequest(request *models.HttpRequest, cfg *config.Config, varProcessor *
 			if !test.Passed {
 				return fmt.Errorf("test '%s' failed: %s", test.Name, test.Error)
 			}
+		}
+	}
+
+	// Save session to disk
+	if sessionMgr != nil {
+		if err := sessionMgr.Save(); err != nil && verbose {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save session: %v\n", err)
 		}
 	}
 

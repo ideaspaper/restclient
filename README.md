@@ -116,6 +116,8 @@ restclient send <file.http> [flags]
 | `--no-history` | | Don't save request to history |
 | `--dry-run` | | Preview request without sending |
 | `--skip-validate` | | Skip request validation |
+| `--session` | | Use a named session instead of directory-based |
+| `--no-session` | | Don't load or save session state |
 
 **Examples:**
 
@@ -222,6 +224,65 @@ restclient history replay 0
 
 # View statistics
 restclient history stats
+```
+
+### session
+
+Manage session data including cookies and script variables. Sessions persist data between CLI invocations.
+
+```bash
+restclient session <subcommand> [args]
+```
+
+**Subcommands:**
+| Command | Description |
+|---------|-------------|
+| `show` | Show session data (cookies, variables) |
+| `clear` | Clear session data |
+| `list` | List all sessions |
+
+**How Sessions Work:**
+
+Sessions are scoped by directory by default (based on the `.http` file location). This means different projects automatically have isolated sessions. You can also use named sessions with the `--session` flag.
+
+**Flags for `show`:**
+| Flag | Description |
+|------|-------------|
+| `--session` | Show a named session |
+| `--dir` | Show session for a specific directory |
+
+**Flags for `clear`:**
+| Flag | Description |
+|------|-------------|
+| `--cookies` | Clear only cookies |
+| `--variables` | Clear only variables |
+| `--all` | Clear all sessions (not just current) |
+| `--session` | Clear a named session |
+| `--dir` | Clear session for a specific directory |
+
+**Examples:**
+
+```bash
+# Show current directory's session
+restclient session show
+
+# Show a named session
+restclient session show --session my-api
+
+# List all sessions
+restclient session list
+
+# Clear current session
+restclient session clear
+
+# Clear only cookies
+restclient session clear --cookies
+
+# Clear only variables (script globals)
+restclient session clear --variables
+
+# Clear all sessions
+restclient session clear --all
 ```
 
 ### completion
@@ -632,6 +693,32 @@ GET https://api.example.com/search?q={{%searchTerm}}
 ## Scripting
 
 restclient supports JavaScript scripting for testing responses and sharing data between requests, similar to Postman.
+
+### Session Persistence
+
+By default, restclient persists cookies and script variables (from `client.global.set()`) between CLI invocations. This enables:
+
+- **Cookie persistence**: Login once, subsequent requests use the session cookie
+- **Variable sharing**: Store tokens or IDs from one request, use in later requests
+- **Request chaining**: Build workflows across multiple CLI invocations
+
+Sessions are scoped by directory (based on the `.http` file location), so different projects have isolated sessions automatically.
+
+```bash
+# First invocation - login and store token
+restclient send api.http --name login
+# Script runs: client.global.set("authToken", response.body.token)
+
+# Second invocation - uses stored token
+restclient send api.http --name getProtected
+# Script runs: var token = client.global.get("authToken")
+
+# Use a named session for isolation
+restclient send api.http --session my-test
+
+# Disable session persistence
+restclient send api.http --no-session
+```
 
 ### Post-Response Scripts
 

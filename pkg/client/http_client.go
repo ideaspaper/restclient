@@ -712,6 +712,38 @@ func (c *HttpClient) ClearCookies() {
 	}
 }
 
+// GetCookies returns all cookies for a given URL
+func (c *HttpClient) GetCookies(urlStr string) []*http.Cookie {
+	if c.cookieJar == nil {
+		return nil
+	}
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return nil
+	}
+	return c.cookieJar.Cookies(parsedURL)
+}
+
+// SetCookies sets cookies for a given URL
+func (c *HttpClient) SetCookies(urlStr string, cookies []*http.Cookie) {
+	if c.cookieJar == nil || len(cookies) == 0 {
+		return
+	}
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return
+	}
+	c.cookieJar.SetCookies(parsedURL, cookies)
+}
+
+// GetResponseCookies extracts cookies from an HTTP response
+func GetResponseCookies(resp *http.Response) []*http.Cookie {
+	if resp == nil {
+		return nil
+	}
+	return resp.Cookies()
+}
+
 // createMultipartBody creates a multipart form body from parts
 func (c *HttpClient) createMultipartBody(parts []models.MultipartPart) (io.Reader, string, error) {
 	body := &bytes.Buffer{}

@@ -303,7 +303,8 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 	varProcessor.SetEnvironment(cfg.CurrentEnvironment)
 	varProcessor.SetEnvironmentVariables(cfg.EnvironmentVariables)
 
-	return sendRequest(request, cfg, varProcessor)
+	// Use empty path for history replay (no session scoping)
+	return sendRequest("", request, cfg, varProcessor)
 }
 
 func printHistoryItem(item models.HistoricalHttpRequest, index int, useColor bool) {
