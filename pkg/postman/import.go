@@ -583,8 +583,12 @@ func convertScriptFromPostman(script string) string {
 
 	// Convert pm.expect(...).to.be.true back to client.assert()
 	// pm.expect(condition, "message").to.be.true -> client.assert(condition, "message")
-	expectWithMsgRegex := regexp.MustCompile(`pm\.expect\(([^,]+),\s*"([^"]+)"\)\.to\.be\.true`)
-	result = expectWithMsgRegex.ReplaceAllString(result, `client.assert($1, "$2")`)
+	// Handle both single and double quotes
+	expectWithDoubleQuoteMsgRegex := regexp.MustCompile(`pm\.expect\(([^,]+),\s*"([^"]+)"\)\.to\.be\.true`)
+	result = expectWithDoubleQuoteMsgRegex.ReplaceAllString(result, `client.assert($1, "$2")`)
+
+	expectWithSingleQuoteMsgRegex := regexp.MustCompile(`pm\.expect\(([^,]+),\s*'([^']+)'\)\.to\.be\.true`)
+	result = expectWithSingleQuoteMsgRegex.ReplaceAllString(result, `client.assert($1, '$2')`)
 
 	// pm.expect(condition).to.be.true -> client.assert(condition)
 	expectSimpleRegex := regexp.MustCompile(`pm\.expect\(([^)]+)\)\.to\.be\.true`)

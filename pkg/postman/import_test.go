@@ -577,6 +577,68 @@ func TestURLParsing(t *testing.T) {
 	}
 }
 
+func TestURLHostFormats(t *testing.T) {
+	tests := []struct {
+		name         string
+		json         string
+		expectedHost string
+	}{
+		{
+			name: "Host as string",
+			json: `{
+				"raw": "{{baseUrl}}/users",
+				"host": "{{baseUrl}}",
+				"path": ["users"]
+			}`,
+			expectedHost: "{{baseUrl}}",
+		},
+		{
+			name: "Host as single-element array",
+			json: `{
+				"raw": "{{baseUrl}}/users",
+				"host": ["{{baseUrl}}"],
+				"path": ["users"]
+			}`,
+			expectedHost: "{{baseUrl}}",
+		},
+		{
+			name: "Host as multi-element array (domain parts)",
+			json: `{
+				"raw": "https://api.example.com/users",
+				"host": ["api", "example", "com"],
+				"path": ["users"]
+			}`,
+			expectedHost: "api.example.com",
+		},
+		{
+			name: "Host as string with variable",
+			json: `{
+				"raw": "https://{{host}}/users",
+				"host": "{{host}}",
+				"path": ["users"]
+			}`,
+			expectedHost: "{{host}}",
+		},
+		{
+			name:         "URL as plain string (no host field)",
+			json:         `"https://api.example.com/users"`,
+			expectedHost: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var url URL
+			if err := json.Unmarshal([]byte(tt.json), &url); err != nil {
+				t.Fatalf("Failed to parse URL: %v", err)
+			}
+			if url.GetHost() != tt.expectedHost {
+				t.Errorf("Expected host '%s', got '%s'", tt.expectedHost, url.GetHost())
+			}
+		})
+	}
+}
+
 func TestDescriptionUnmarshal(t *testing.T) {
 	// Test string description
 	stringDesc := `"This is a simple description"`
@@ -1165,5 +1227,441 @@ client.test("Created", function() {
 	// Verify JSON body is preserved
 	if !strings.Contains(content, `"name": "John Doe"`) {
 		t.Error("JSON body not preserved")
+	}
+}
+
+func TestReverseRoundTrip(t *testing.T) {
+	// Test reverse roundtrip: Postman -> .http -> Postman
+	// This verifies that starting from a Postman collection, we can convert to .http and back
+	tmpDir, err := os.MkdirTemp("", "postman-reverse-roundtrip-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a comprehensive Postman collection with scripts
+	originalPostman := `{
+		"info": {
+			"_postman_id": "test-reverse-roundtrip",
+			"name": "Reverse Roundtrip Test",
+			"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+		},
+		"item": [
+			{
+				"name": "Get Users",
+				"request": {
+					"method": "GET",
+					"header": [
+						{"key": "Accept", "value": "application/json"}
+					],
+					"url": {
+						"raw": "{{baseUrl}}/users",
+						"host": ["{{baseUrl}}"],
+						"path": ["users"]
+					}
+				}
+			},
+			{
+				"name": "Create User",
+				"event": [
+					{
+						"listen": "prerequest",
+						"script": {
+							"type": "text/javascript",
+							"exec": [
+								"console.log('Preparing request');",
+								"pm.globals.set('timestamp', Date.now());"
+							]
+						}
+					},
+					{
+						"listen": "test",
+						"script": {
+							"type": "text/javascript",
+							"exec": [
+								"pm.test('Status is 201', function() {",
+								"    pm.expect(pm.response.code === 201, 'Expected 201').to.be.true;",
+								"});",
+								"console.log('User created: ' + pm.response.json().id);",
+								"pm.globals.set('userId', pm.response.json().id);"
+							]
+						}
+					}
+				],
+				"request": {
+					"method": "POST",
+					"header": [
+						{"key": "Content-Type", "value": "application/json"}
+					],
+					"body": {
+						"mode": "raw",
+						"raw": "{\"name\": \"Test User\", \"email\": \"test@example.com\"}"
+					},
+					"url": {
+						"raw": "{{baseUrl}}/users",
+						"host": ["{{baseUrl}}"],
+						"path": ["users"]
+					}
+				}
+			},
+			{
+				"name": "Get User By ID",
+				"event": [
+					{
+						"listen": "test",
+						"script": {
+							"type": "text/javascript",
+							"exec": [
+								"pm.test('User found', function() {",
+								"    pm.expect(pm.response.code === 200, 'Expected 200').to.be.true;",
+								"    pm.expect(pm.response.json().id !== undefined, 'User should have id').to.be.true;",
+								"});"
+							]
+						}
+					}
+				],
+				"request": {
+					"method": "GET",
+					"header": [
+						{"key": "Accept", "value": "application/json"}
+					],
+					"url": {
+						"raw": "{{baseUrl}}/users/{{userId}}",
+						"host": ["{{baseUrl}}"],
+						"path": ["users", "{{userId}}"]
+					}
+				}
+			}
+		],
+		"variable": [
+			{"key": "baseUrl", "value": "https://api.example.com"},
+			{"key": "userId", "value": "1"}
+		]
+	}`
+
+	// Write original Postman collection
+	originalPath := filepath.Join(tmpDir, "original.json")
+	if err := os.WriteFile(originalPath, []byte(originalPostman), 0644); err != nil {
+		t.Fatalf("Failed to write original Postman collection: %v", err)
+	}
+
+	// Import to .http format
+	httpPath := filepath.Join(tmpDir, "converted.http")
+	importOpts := DefaultImportOptions()
+	importOpts.OutputFile = httpPath
+	importOpts.SingleFile = true
+	importOpts.IncludeVariables = true
+	importOpts.IncludeScripts = true
+
+	importResult, err := Import(originalPath, importOpts)
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	if importResult.RequestsCount != 3 {
+		t.Errorf("Expected 3 requests imported, got %d", importResult.RequestsCount)
+	}
+
+	// Read the .http file to verify client.* syntax
+	httpContent, err := os.ReadFile(httpPath)
+	if err != nil {
+		t.Fatalf("Failed to read .http file: %v", err)
+	}
+
+	httpStr := string(httpContent)
+
+	// Verify scripts were converted to client.* syntax
+	if strings.Contains(httpStr, "pm.test(") {
+		t.Error(".http file should not contain pm.test()")
+	}
+	if strings.Contains(httpStr, "pm.expect(") {
+		t.Error(".http file should not contain pm.expect()")
+	}
+	if !strings.Contains(httpStr, "client.test(") {
+		t.Error(".http file should contain client.test()")
+	}
+	if !strings.Contains(httpStr, "client.assert(") {
+		t.Error(".http file should contain client.assert()")
+	}
+
+	// Export back to Postman
+	reexportPath := filepath.Join(tmpDir, "reexported.json")
+	exportOpts := DefaultExportOptions()
+	exportOpts.IncludeVariables = true
+	exportOpts.IncludeScripts = true
+
+	exportResult, err := Export([]string{httpPath}, reexportPath, exportOpts)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	if exportResult.RequestsCount != 3 {
+		t.Errorf("Expected 3 requests exported, got %d", exportResult.RequestsCount)
+	}
+
+	// Read the re-exported Postman collection
+	reexportContent, err := os.ReadFile(reexportPath)
+	if err != nil {
+		t.Fatalf("Failed to read re-exported collection: %v", err)
+	}
+
+	// Parse it to verify structure
+	var reexported Collection
+	if err := json.Unmarshal(reexportContent, &reexported); err != nil {
+		t.Fatalf("Failed to parse re-exported collection: %v", err)
+	}
+
+	// Verify basic structure
+	if len(reexported.Item) != 3 {
+		t.Errorf("Expected 3 items, got %d", len(reexported.Item))
+	}
+
+	// Verify variables
+	if len(reexported.Variable) < 2 {
+		t.Errorf("Expected at least 2 variables, got %d", len(reexported.Variable))
+	}
+
+	// Find baseUrl variable
+	foundBaseUrl := false
+	for _, v := range reexported.Variable {
+		if v.Key == "baseUrl" && v.GetValue() == "https://api.example.com" {
+			foundBaseUrl = true
+			break
+		}
+	}
+	if !foundBaseUrl {
+		t.Error("baseUrl variable not preserved correctly")
+	}
+
+	// Verify Create User has scripts with pm.* syntax
+	for _, item := range reexported.Item {
+		if item.Name == "Create User" {
+			// Check for pre-request script
+			foundPrerequest := false
+			foundTest := false
+			for _, event := range item.Event {
+				if event.Listen == "prerequest" {
+					foundPrerequest = true
+					script := event.Script.GetExec()
+					if !strings.Contains(script, "console.log(") {
+						t.Error("Pre-request script should contain console.log()")
+					}
+					if !strings.Contains(script, "pm.globals.set(") {
+						t.Error("Pre-request script should contain pm.globals.set()")
+					}
+					// Should NOT contain client.* syntax
+					if strings.Contains(script, "client.log(") {
+						t.Error("Pre-request script should not contain client.log()")
+					}
+				}
+				if event.Listen == "test" {
+					foundTest = true
+					script := event.Script.GetExec()
+					if !strings.Contains(script, "pm.test(") {
+						t.Error("Test script should contain pm.test()")
+					}
+					if !strings.Contains(script, "pm.expect(") {
+						t.Error("Test script should contain pm.expect()")
+					}
+					if !strings.Contains(script, "pm.response.json()") {
+						t.Error("Test script should contain pm.response.json()")
+					}
+					// Should NOT contain client.* syntax
+					if strings.Contains(script, "client.test(") {
+						t.Error("Test script should not contain client.test()")
+					}
+					if strings.Contains(script, "client.assert(") {
+						t.Error("Test script should not contain client.assert()")
+					}
+				}
+			}
+			if !foundPrerequest {
+				t.Error("Create User should have pre-request script")
+			}
+			if !foundTest {
+				t.Error("Create User should have test script")
+			}
+		}
+	}
+
+	// Verify URLs are correct (no leading slash issue)
+	for _, item := range reexported.Item {
+		if item.Request != nil {
+			rawURL := item.Request.URL.GetRaw()
+			if strings.HasPrefix(rawURL, "/{{baseUrl}}") {
+				t.Errorf("URL should not have leading slash: %s", rawURL)
+			}
+			if !strings.Contains(rawURL, "{{baseUrl}}") {
+				t.Errorf("URL should contain {{baseUrl}}: %s", rawURL)
+			}
+		}
+	}
+}
+
+func TestReverseRoundTripWithStringHost(t *testing.T) {
+	// Test reverse roundtrip with string host format (like real Postman exports)
+	// This verifies that host as string (not array) works correctly
+	tmpDir, err := os.MkdirTemp("", "postman-string-host-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create Postman collection with string host format (like real Postman exports)
+	originalPostman := `{
+		"info": {
+			"_postman_id": "test-string-host",
+			"name": "String Host Test",
+			"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+		},
+		"item": [
+			{
+				"name": "Get Users",
+				"request": {
+					"method": "GET",
+					"header": [
+						{"key": "Accept", "value": "application/json"}
+					],
+					"url": {
+						"raw": "{{baseUrl}}/users",
+						"host": "{{baseUrl}}",
+						"path": ["users"]
+					}
+				}
+			},
+			{
+				"name": "Get User By ID",
+				"event": [
+					{
+						"listen": "test",
+						"script": {
+							"type": "text/javascript",
+							"exec": [
+								"pm.test('User found', function() {",
+								"    pm.expect(pm.response.code === 200).to.be.true;",
+								"});"
+							]
+						}
+					}
+				],
+				"request": {
+					"method": "GET",
+					"header": [
+						{"key": "Accept", "value": "application/json"}
+					],
+					"url": {
+						"raw": "{{baseUrl}}/users/{{userId}}",
+						"host": "{{baseUrl}}",
+						"path": ["users", "{{userId}}"]
+					}
+				}
+			}
+		],
+		"variable": [
+			{"key": "baseUrl", "value": "https://api.example.com"},
+			{"key": "userId", "value": "1"}
+		]
+	}`
+
+	// Write original Postman collection
+	originalPath := filepath.Join(tmpDir, "original.json")
+	if err := os.WriteFile(originalPath, []byte(originalPostman), 0644); err != nil {
+		t.Fatalf("Failed to write original Postman collection: %v", err)
+	}
+
+	// Import to .http format
+	httpPath := filepath.Join(tmpDir, "converted.http")
+	importOpts := DefaultImportOptions()
+	importOpts.OutputFile = httpPath
+	importOpts.SingleFile = true
+	importOpts.IncludeVariables = true
+	importOpts.IncludeScripts = true
+
+	importResult, err := Import(originalPath, importOpts)
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	if importResult.RequestsCount != 2 {
+		t.Errorf("Expected 2 requests imported, got %d", importResult.RequestsCount)
+	}
+
+	// Read the .http file
+	httpContent, err := os.ReadFile(httpPath)
+	if err != nil {
+		t.Fatalf("Failed to read .http file: %v", err)
+	}
+
+	httpStr := string(httpContent)
+
+	// Verify URLs are correct (no leading slash)
+	if strings.Contains(httpStr, "GET /{{baseUrl}}") {
+		t.Error(".http file should not have leading slash before variable")
+	}
+	if !strings.Contains(httpStr, "GET {{baseUrl}}/users") {
+		t.Error(".http file should contain GET {{baseUrl}}/users")
+	}
+
+	// Verify scripts were converted
+	if !strings.Contains(httpStr, "client.test(") {
+		t.Error(".http file should contain client.test()")
+	}
+
+	// Export back to Postman
+	reexportPath := filepath.Join(tmpDir, "reexported.json")
+	exportOpts := DefaultExportOptions()
+	exportOpts.IncludeVariables = true
+	exportOpts.IncludeScripts = true
+
+	exportResult, err := Export([]string{httpPath}, reexportPath, exportOpts)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	if exportResult.RequestsCount != 2 {
+		t.Errorf("Expected 2 requests exported, got %d", exportResult.RequestsCount)
+	}
+
+	// Read and parse re-exported collection
+	reexportContent, err := os.ReadFile(reexportPath)
+	if err != nil {
+		t.Fatalf("Failed to read re-exported collection: %v", err)
+	}
+
+	var reexported Collection
+	if err := json.Unmarshal(reexportContent, &reexported); err != nil {
+		t.Fatalf("Failed to parse re-exported collection: %v", err)
+	}
+
+	// Verify URLs don't have leading slash issue
+	for _, item := range reexported.Item {
+		if item.Request != nil {
+			rawURL := item.Request.URL.GetRaw()
+			if strings.HasPrefix(rawURL, "/{{baseUrl}}") {
+				t.Errorf("URL should not have leading slash: %s", rawURL)
+			}
+		}
+	}
+
+	// Verify scripts are in Postman format
+	for _, item := range reexported.Item {
+		if item.Name == "Get User By ID" {
+			foundTest := false
+			for _, event := range item.Event {
+				if event.Listen == "test" {
+					foundTest = true
+					script := event.Script.GetExec()
+					if !strings.Contains(script, "pm.test(") {
+						t.Error("Script should contain pm.test()")
+					}
+					if strings.Contains(script, "client.test(") {
+						t.Error("Script should not contain client.test()")
+					}
+				}
+			}
+			if !foundTest {
+				t.Error("Get User By ID should have test script")
+			}
+		}
 	}
 }
