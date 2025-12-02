@@ -291,6 +291,7 @@ restclient postman import my-collection.json --no-scripts
 ```
 
 **Import Features:**
+
 - Converts all request types (GET, POST, PUT, DELETE, PATCH, etc.)
 - Preserves folder structure as directories
 - Converts authentication (Basic, Bearer, Digest, AWS v4, API Key, OAuth1/2)
@@ -339,6 +340,7 @@ restclient postman export api.http --minify
 ```
 
 **Export Features:**
+
 - Exports all requests with headers and body
 - Converts authentication headers to Postman auth objects
 - Converts file variables to collection variables
@@ -944,14 +946,14 @@ Configuration is stored in `~/.restclient/config.json`:
 
 ## Global Flags
 
-| Flag         | Short | Description            |
-| ------------ | ----- | ---------------------- |
-| `--config`   | `-c`  | Config file path       |
-| `--env`      | `-e`  | Environment to use     |
+| Flag         | Short | Description                                |
+| ------------ | ----- | ------------------------------------------ |
+| `--config`   | `-c`  | Config file path                           |
+| `--env`      | `-e`  | Environment to use                         |
 | `--verbose`  | `-v`  | Verbose output (includes parsing warnings) |
-| `--no-color` |       | Disable colored output |
-| `--version`  |       | Show version           |
-| `--help`     | `-h`  | Show help              |
+| `--no-color` |       | Disable colored output                     |
+| `--version`  |       | Show version                               |
+| `--help`     | `-h`  | Show help                                  |
 
 ## Examples
 
@@ -1069,14 +1071,14 @@ Request validation failed:
 
 **Common validation errors:**
 
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `URL is required` | Empty URL | Ensure request has a valid URL |
-| `URL must include scheme` | Missing `http://` or `https://` | Add scheme to URL |
-| `URL contains unresolved variables` | Variables like `{{baseUrl}}` not resolved | Check environment variables and spelling |
-| `header value contains unresolved variables` | Header has `{{variable}}` syntax | Ensure variable is defined |
-| `Authorization header appears to contain a placeholder` | Auth header has `your-token` or similar | Replace placeholder with actual token |
-| `URL contains spaces` | Spaces in URL not encoded | URL-encode spaces as `%20` |
+| Error                                                   | Cause                                     | Solution                                 |
+| ------------------------------------------------------- | ----------------------------------------- | ---------------------------------------- |
+| `URL is required`                                       | Empty URL                                 | Ensure request has a valid URL           |
+| `URL must include scheme`                               | Missing `http://` or `https://`           | Add scheme to URL                        |
+| `URL contains unresolved variables`                     | Variables like `{{baseUrl}}` not resolved | Check environment variables and spelling |
+| `header value contains unresolved variables`            | Header has `{{variable}}` syntax          | Ensure variable is defined               |
+| `Authorization header appears to contain a placeholder` | Auth header has `your-token` or similar   | Replace placeholder with actual token    |
+| `URL contains spaces`                                   | Spaces in URL not encoded                 | URL-encode spaces as `%20`               |
 
 **Bypassing validation:**
 
@@ -1088,14 +1090,14 @@ restclient send api.http --skip-validate
 
 ### Parsing Warnings
 
-When using `--verbose`, restclient shows warnings for invalid request blocks that were skipped:
+When using `--verbose`, restclient shows warnings for invalid request blocks that could not be parsed:
 
 ```bash
 restclient send api.http --verbose
 # Warning: block 2: skipped invalid request block: no request line found
 ```
 
-This helps identify issues in multi-request `.http` files where some blocks may be malformed.
+Invalid blocks (e.g., blocks with only comments or missing request lines) will not appear in the selection menu. This helps identify syntax issues in multi-request `.http` files.
 
 ### SSL Certificate Errors
 
