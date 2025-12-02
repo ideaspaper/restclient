@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -274,6 +275,7 @@ func writeRequest(content *strings.Builder, item *Item, collectionAuth *Auth, op
 			if event.Listen == "prerequest" && event.Script != nil {
 				script := event.Script.GetExec()
 				if script != "" {
+					script = convertScriptFromPostman(script)
 					content.WriteString("< {%\n")
 					for _, line := range strings.Split(script, "\n") {
 						content.WriteString(line)
@@ -316,6 +318,7 @@ func writeRequest(content *strings.Builder, item *Item, collectionAuth *Auth, op
 			if event.Listen == "test" && event.Script != nil {
 				script := event.Script.GetExec()
 				if script != "" {
+					script = convertScriptFromPostman(script)
 					content.WriteString("\n> {%\n")
 					for _, line := range strings.Split(script, "\n") {
 						content.WriteString(line)
@@ -568,4 +571,81 @@ func countFolders(items []Item) int {
 		}
 	}
 	return count
+}
+
+// convertScriptFromPostman converts Postman scripts back to rest-client format
+// It transforms pm.* API calls to client.* equivalents
+func convertScriptFromPostman(script string) string {
+	result := script
+
+	// Convert pm.test() to client.test()
+	result = strings.ReplaceAll(result, "pm.test(", "client.test(")
+
+	// Convert pm.expect(...).to.be.true back to client.assert()
+	// pm.expect(condition, "message").to.be.true -> client.assert(condition, "message")
+	expectWithMsgRegex := regexp.MustCompile(`pm\.expect\(([^,]+),\s*"([^"]+)"\)\.to\.be\.true`)
+	result = expectWithMsgRegex.ReplaceAllString(result, `client.assert($1, "$2")`)
+
+	// pm.expect(condition).to.be.true -> client.assert(condition)
+	expectSimpleRegex := regexp.MustCompile(`pm\.expect\(([^)]+)\)\.to\.be\.true`)
+	result = expectSimpleRegex.ReplaceAllString(result, `client.assert($1)`)
+
+	// Convert console.log() to client.log()
+	result = strings.ReplaceAll(result, "console.log(", "client.log(")
+
+	// Convert pm.globals.set() to client.global.set()
+	result = strings.ReplaceAll(result, "pm.globals.set(", "client.global.set(")
+
+	// Convert pm.globals.get() to client.global.get()
+	result = strings.ReplaceAll(result, "pm.globals.get(", "client.global.get(")
+
+	// Convert pm.response.code to response.status
+	result = strings.ReplaceAll(result, "pm.response.code", "response.status")
+
+	// Convert pm.response.json() to response.body
+	// Need to handle pm.response.json().property -> response.body.property
+	result = strings.ReplaceAll(result, "pm.response.json().", "response.body.")
+	result = strings.ReplaceAll(result, "pm.response.json())", "response.body)")
+	result = strings.ReplaceAll(result, "pm.response.json()", "response.body")
+
+	// Convert pm.response.headers.get() to response.headers.valueOf()
+	result = strings.ReplaceAll(result, "pm.response.headers.get(", "response.headers.valueOf(")
+
+	// Convert pm.variables.replaceIn("{{$guid}}") to $uuid()
+	result = strings.ReplaceAll(result, `pm.variables.replaceIn("{{$guid}}")`, "$uuid()")
+
+	// Convert Date.now() to $timestamp()
+	result = strings.ReplaceAll(result, "Date.now()", "$timestamp()")
+
+	// Convert new Date().toISOString() to $isoTimestamp()
+	result = strings.ReplaceAll(result, "new Date().toISOString()", "$isoTimestamp()")
+
+	// Convert Math.floor(Math.random() * (max - min + 1)) + min) back to $randomInt(min, max)
+	randomIntRegex := regexp.MustCompile(`\(Math\.floor\(Math\.random\(\)\s*\*\s*\((\d+)\s*-\s*(\d+)\s*\+\s*1\)\)\s*\+\s*(\d+)\)`)
+	result = randomIntRegex.ReplaceAllString(result, `$$randomInt($3, $1)`)
+
+	// Convert Array(n).fill(0).map(() => Math.random().toString(36).charAt(2)).join('') back to $randomString(n)
+	randomStringRegex := regexp.MustCompile(`Array\((\d+)\)\.fill\(0\)\.map\(\(\)\s*=>\s*Math\.random\(\)\.toString\(36\)\.charAt\(2\)\)\.join\(''\)`)
+	result = randomStringRegex.ReplaceAllString(result, `$$randomString($1)`)
+
+	// Convert btoa() to $base64()
+	result = strings.ReplaceAll(result, "btoa(", "$base64(")
+
+	// Convert atob() to $base64Decode()
+	result = strings.ReplaceAll(result, "atob(", "$base64Decode(")
+
+	// Convert CryptoJS hash functions
+	// CryptoJS.MD5(str).toString() -> $md5(str)
+	md5Regex := regexp.MustCompile(`CryptoJS\.MD5\(([^)]+)\)\.toString\(\)`)
+	result = md5Regex.ReplaceAllString(result, `$$md5($1)`)
+
+	// CryptoJS.SHA256(str).toString() -> $sha256(str)
+	sha256Regex := regexp.MustCompile(`CryptoJS\.SHA256\(([^)]+)\)\.toString\(\)`)
+	result = sha256Regex.ReplaceAllString(result, `$$sha256($1)`)
+
+	// CryptoJS.SHA512(str).toString() -> $sha512(str)
+	sha512Regex := regexp.MustCompile(`CryptoJS\.SHA512\(([^)]+)\)\.toString\(\)`)
+	result = sha512Regex.ReplaceAllString(result, `$$sha512($1)`)
+
+	return result
 }

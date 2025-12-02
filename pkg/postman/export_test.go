@@ -583,6 +583,366 @@ func TestGenerateRequestName(t *testing.T) {
 	}
 }
 
+func TestParseURLWithVariables(t *testing.T) {
+	tests := []struct {
+		name         string
+		rawURL       string
+		expectedHost interface{}
+		expectedPath []string
+		expectedRaw  string
+	}{
+		{
+			name:         "Variable host with path",
+			rawURL:       "{{baseUrl}}/users/1/albums",
+			expectedHost: "{{baseUrl}}",
+			expectedPath: []string{"users", "1", "albums"},
+			expectedRaw:  "{{baseUrl}}/users/1/albums",
+		},
+		{
+			name:         "Variable host with single path segment",
+			rawURL:       "{{baseUrl}}/posts",
+			expectedHost: "{{baseUrl}}",
+			expectedPath: []string{"posts"},
+			expectedRaw:  "{{baseUrl}}/posts",
+		},
+		{
+			name:         "Variable host only",
+			rawURL:       "{{baseUrl}}",
+			expectedHost: "{{baseUrl}}",
+			expectedPath: nil,
+			expectedRaw:  "{{baseUrl}}",
+		},
+		{
+			name:         "Variable host with query params",
+			rawURL:       "{{baseUrl}}/users?userId=1&active=true",
+			expectedHost: "{{baseUrl}}",
+			expectedPath: []string{"users"},
+			expectedRaw:  "{{baseUrl}}/users?userId=1&active=true",
+		},
+		{
+			name:         "Regular URL still works",
+			rawURL:       "https://api.example.com/users",
+			expectedHost: []string{"api", "example", "com"},
+			expectedPath: []string{"users"},
+			expectedRaw:  "https://api.example.com/users",
+		},
+		{
+			name:         "Variable host with nested path",
+			rawURL:       "{{baseUrl}}/api/v1/users/123/posts",
+			expectedHost: "{{baseUrl}}",
+			expectedPath: []string{"api", "v1", "users", "123", "posts"},
+			expectedRaw:  "{{baseUrl}}/api/v1/users/123/posts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseURL(tt.rawURL)
+
+			if result.Raw != tt.expectedRaw {
+				t.Errorf("Expected raw '%s', got '%s'", tt.expectedRaw, result.Raw)
+			}
+
+			// Check host
+			switch expected := tt.expectedHost.(type) {
+			case string:
+				if hostStr, ok := result.Host.(string); ok {
+					if hostStr != expected {
+						t.Errorf("Expected host '%s', got '%s'", expected, hostStr)
+					}
+				} else {
+					t.Errorf("Expected host to be string '%s', got %v", expected, result.Host)
+				}
+			case []string:
+				if hostArr, ok := result.Host.([]string); ok {
+					if len(hostArr) != len(expected) {
+						t.Errorf("Expected host %v, got %v", expected, hostArr)
+					} else {
+						for i, v := range expected {
+							if hostArr[i] != v {
+								t.Errorf("Expected host[%d] = '%s', got '%s'", i, v, hostArr[i])
+							}
+						}
+					}
+				} else {
+					t.Errorf("Expected host to be []string %v, got %v", expected, result.Host)
+				}
+			}
+
+			// Check path
+			if tt.expectedPath == nil {
+				if result.Path != nil {
+					t.Errorf("Expected nil path, got %v", result.Path)
+				}
+			} else {
+				pathArr, ok := result.Path.([]string)
+				if !ok {
+					t.Errorf("Expected path to be []string, got %v", result.Path)
+				} else if len(pathArr) != len(tt.expectedPath) {
+					t.Errorf("Expected path %v, got %v", tt.expectedPath, pathArr)
+				} else {
+					for i, v := range tt.expectedPath {
+						if pathArr[i] != v {
+							t.Errorf("Expected path[%d] = '%s', got '%s'", i, v, pathArr[i])
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestParseURLQueryParams(t *testing.T) {
+	result := parseURL("{{baseUrl}}/users?userId=1&status=active")
+
+	if len(result.Query) != 2 {
+		t.Fatalf("Expected 2 query params, got %d", len(result.Query))
+	}
+
+	queryMap := make(map[string]string)
+	for _, q := range result.Query {
+		if q.Key != nil && q.Value != nil {
+			queryMap[*q.Key] = *q.Value
+		}
+	}
+
+	if queryMap["userId"] != "1" {
+		t.Errorf("Expected userId=1, got userId=%s", queryMap["userId"])
+	}
+	if queryMap["status"] != "active" {
+		t.Errorf("Expected status=active, got status=%s", queryMap["status"])
+	}
+}
+
+func TestConvertScriptToPostman(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Convert client.test to pm.test",
+			input:    `client.test("Status is 200", function() {`,
+			expected: `pm.test("Status is 200", function() {`,
+		},
+		{
+			name:     "Convert client.assert with message",
+			input:    `client.assert(response.status === 200, "Expected status 200");`,
+			expected: `pm.expect(pm.response.code === 200, "Expected status 200").to.be.true;`,
+		},
+		{
+			name:     "Convert client.assert without message",
+			input:    `client.assert(response.status === 200);`,
+			expected: `pm.expect(pm.response.code === 200).to.be.true;`,
+		},
+		{
+			name:     "Convert client.log",
+			input:    `client.log("Hello world");`,
+			expected: `console.log("Hello world");`,
+		},
+		{
+			name:     "Convert client.global.set",
+			input:    `client.global.set("key", "value");`,
+			expected: `pm.globals.set("key", "value");`,
+		},
+		{
+			name:     "Convert client.global.get",
+			input:    `var x = client.global.get("key");`,
+			expected: `var x = pm.globals.get("key");`,
+		},
+		{
+			name:     "Convert response.status",
+			input:    `if (response.status === 200) {`,
+			expected: `if (pm.response.code === 200) {`,
+		},
+		{
+			name:     "Convert response.body property access",
+			input:    `var id = response.body.id;`,
+			expected: `var id = pm.response.json().id;`,
+		},
+		{
+			name:     "Convert response.body in parentheses",
+			input:    `client.assert(response.body)`,
+			expected: `pm.expect(pm.response.json()).to.be.true`,
+		},
+		{
+			name:     "Convert response.headers.valueOf",
+			input:    `var ct = response.headers.valueOf("Content-Type");`,
+			expected: `var ct = pm.response.headers.get("Content-Type");`,
+		},
+		{
+			name:     "Convert $uuid()",
+			input:    `var id = $uuid();`,
+			expected: `var id = pm.variables.replaceIn("{{$guid}}");`,
+		},
+		{
+			name:     "Convert $timestamp()",
+			input:    `var ts = $timestamp();`,
+			expected: `var ts = Date.now();`,
+		},
+		{
+			name:     "Convert $isoTimestamp()",
+			input:    `var iso = $isoTimestamp();`,
+			expected: `var iso = new Date().toISOString();`,
+		},
+		{
+			name:     "Convert $randomInt(min, max)",
+			input:    `var num = $randomInt(1, 100);`,
+			expected: `var num = (Math.floor(Math.random() * (100 - 1 + 1)) + 1);`,
+		},
+		{
+			name:     "Convert $randomString(length)",
+			input:    `var str = $randomString(10);`,
+			expected: `var str = Array(10).fill(0).map(() => Math.random().toString(36).charAt(2)).join('');`,
+		},
+		{
+			name:     "Convert $base64()",
+			input:    `var encoded = $base64(data);`,
+			expected: `var encoded = btoa(data);`,
+		},
+		{
+			name:     "Convert $base64Decode()",
+			input:    `var decoded = $base64Decode(encoded);`,
+			expected: `var decoded = atob(encoded);`,
+		},
+		{
+			name:     "Convert $md5()",
+			input:    `var hash = $md5(data);`,
+			expected: `var hash = CryptoJS.MD5(data).toString();`,
+		},
+		{
+			name:     "Convert $sha256()",
+			input:    `var hash = $sha256(data);`,
+			expected: `var hash = CryptoJS.SHA256(data).toString();`,
+		},
+		{
+			name:     "Convert $sha512()",
+			input:    `var hash = $sha512(data);`,
+			expected: `var hash = CryptoJS.SHA512(data).toString();`,
+		},
+		{
+			name: "Convert complex script",
+			input: `client.test("Status is 200", function() {
+    client.assert(response.status === 200, "Expected status 200");
+});
+client.log("Post title: " + response.body.title);
+client.global.set("postId", response.body.id);`,
+			expected: `pm.test("Status is 200", function() {
+    pm.expect(pm.response.code === 200, "Expected status 200").to.be.true;
+});
+console.log("Post title: " + pm.response.json().title);
+pm.globals.set("postId", pm.response.json().id);`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertScriptToPostman(tt.input)
+			if result != tt.expected {
+				t.Errorf("Expected:\n%s\nGot:\n%s", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestExportWithClientScripts(t *testing.T) {
+	// Test that client.* scripts are properly converted to pm.* in export
+	tmpDir, err := os.MkdirTemp("", "postman-export-client-scripts-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	httpContent := `# @name TestRequest
+GET https://api.example.com/test
+
+> {%
+client.test("Status is 200", function() {
+    client.assert(response.status === 200, "Expected status 200");
+});
+client.log("Response: " + response.body.message);
+client.global.set("testId", response.body.id);
+%}
+`
+
+	httpPath := filepath.Join(tmpDir, "client-scripts.http")
+	if err := os.WriteFile(httpPath, []byte(httpContent), 0644); err != nil {
+		t.Fatalf("Failed to write .http file: %v", err)
+	}
+
+	outputPath := filepath.Join(tmpDir, "collection.json")
+	opts := DefaultExportOptions()
+	opts.IncludeScripts = true
+
+	_, err = Export([]string{httpPath}, outputPath, opts)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+
+	var collection Collection
+	if err := json.Unmarshal(data, &collection); err != nil {
+		t.Fatalf("Failed to parse exported collection: %v", err)
+	}
+
+	req := collection.Item[0]
+	if len(req.Event) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(req.Event))
+	}
+
+	testEvent := req.Event[0]
+	if testEvent.Listen != "test" {
+		t.Errorf("Expected 'test' event, got '%s'", testEvent.Listen)
+	}
+
+	// Check that script was converted
+	scriptContent := testEvent.Script.GetExec()
+
+	// Verify conversions happened
+	if !contains(scriptContent, "pm.test(") {
+		t.Error("Expected pm.test() in converted script")
+	}
+	if !contains(scriptContent, "pm.expect(") {
+		t.Error("Expected pm.expect() in converted script")
+	}
+	if !contains(scriptContent, "pm.response.code") {
+		t.Error("Expected pm.response.code in converted script")
+	}
+	if !contains(scriptContent, "console.log(") {
+		t.Error("Expected console.log() in converted script")
+	}
+	if !contains(scriptContent, "pm.globals.set(") {
+		t.Error("Expected pm.globals.set() in converted script")
+	}
+	if !contains(scriptContent, "pm.response.json()") {
+		t.Error("Expected pm.response.json() in converted script")
+	}
+
+	// Verify old syntax is NOT present
+	if contains(scriptContent, "client.test(") {
+		t.Error("Script should not contain client.test()")
+	}
+	if contains(scriptContent, "client.assert(") {
+		t.Error("Script should not contain client.assert()")
+	}
+	if contains(scriptContent, "client.log(") {
+		t.Error("Script should not contain client.log()")
+	}
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRoundTrip(t *testing.T) {
 	// Test that import -> export -> import produces equivalent results
 	tmpDir, err := os.MkdirTemp("", "postman-roundtrip-test")

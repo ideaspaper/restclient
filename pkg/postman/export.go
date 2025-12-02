@@ -230,21 +230,23 @@ func convertRequestToItem(req *models.HttpRequest, opts ExportOptions) Item {
 	// Add scripts
 	if opts.IncludeScripts {
 		if req.Metadata.PreScript != "" {
+			convertedScript := convertScriptToPostman(req.Metadata.PreScript)
 			item.Event = append(item.Event, Event{
 				Listen: "prerequest",
 				Script: &Script{
 					Type: "text/javascript",
-					Exec: strings.Split(req.Metadata.PreScript, "\n"),
+					Exec: strings.Split(convertedScript, "\n"),
 				},
 			})
 		}
 
 		if req.Metadata.PostScript != "" {
+			convertedScript := convertScriptToPostman(req.Metadata.PostScript)
 			item.Event = append(item.Event, Event{
 				Listen: "test",
 				Script: &Script{
 					Type: "text/javascript",
-					Exec: strings.Split(req.Metadata.PostScript, "\n"),
+					Exec: strings.Split(convertedScript, "\n"),
 				},
 			})
 		}
@@ -301,7 +303,70 @@ func parseURL(rawURL string) *URL {
 	// Handle Postman-style variables (convert {{var}} to {{var}} - they're compatible)
 	// But we need to parse without breaking on variables
 
-	// Try to parse the URL
+	// Check if URL starts with a variable like {{baseUrl}}
+	// In this case, url.Parse won't work correctly, so we need special handling
+	varPrefixRegex := regexp.MustCompile(`^(\{\{[^}]+\}\})(.*)$`)
+	if matches := varPrefixRegex.FindStringSubmatch(rawURL); matches != nil {
+		// URL starts with a variable (e.g., {{baseUrl}}/path)
+		hostVar := matches[1]   // e.g., "{{baseUrl}}"
+		remainder := matches[2] // e.g., "/users/1/albums" or "/users?id=1"
+
+		// Set host as the variable
+		pmURL.Host = hostVar
+
+		// Parse the remainder for path and query
+		if remainder != "" {
+			// Split query string if present
+			pathPart := remainder
+			queryPart := ""
+			if idx := strings.Index(remainder, "?"); idx != -1 {
+				pathPart = remainder[:idx]
+				queryPart = remainder[idx+1:]
+			}
+
+			// Handle path - remove leading slash and split
+			if pathPart != "" && pathPart != "/" {
+				pathParts := strings.Split(strings.TrimPrefix(pathPart, "/"), "/")
+				if len(pathParts) > 0 && pathParts[0] != "" {
+					pmURL.Path = pathParts
+				}
+			}
+
+			// Handle query parameters
+			if queryPart != "" {
+				parsedQuery, err := url.ParseQuery(queryPart)
+				if err == nil {
+					for key, values := range parsedQuery {
+						for _, value := range values {
+							k, v := key, value // Create local copies for pointer
+							pmURL.Query = append(pmURL.Query, Query{
+								Key:   &k,
+								Value: &v,
+							})
+						}
+					}
+				}
+			}
+		}
+
+		// Extract path variables (e.g., :id or {{id}})
+		pathVarRegex := regexp.MustCompile(`:(\w+)|{{(\w+)}}`)
+		if matches := pathVarRegex.FindAllStringSubmatch(rawURL, -1); matches != nil {
+			for _, match := range matches {
+				varName := match[1]
+				if varName == "" {
+					varName = match[2]
+				}
+				pmURL.Variable = append(pmURL.Variable, Variable{
+					Key: varName,
+				})
+			}
+		}
+
+		return pmURL
+	}
+
+	// Try to parse the URL normally
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		// If parsing fails, just use the raw URL
@@ -609,4 +674,84 @@ func generateRequestName(method, rawURL string) string {
 	}
 
 	return method + " Request"
+}
+
+// convertScriptToPostman converts rest-client scripts to Postman-compatible scripts
+// It transforms client.* API calls to pm.* equivalents
+func convertScriptToPostman(script string) string {
+	result := script
+
+	// Convert client.test() to pm.test()
+	// client.test("name", function() { ... }) -> pm.test("name", function() { ... })
+	result = strings.ReplaceAll(result, "client.test(", "pm.test(")
+
+	// Convert client.assert() to pm.expect().to.be.true
+	// client.assert(condition, "message") -> pm.expect(condition).to.be.true
+	// This is a more complex transformation, so we use regex
+	assertRegex := regexp.MustCompile(`client\.assert\(([^,]+),\s*"([^"]+)"\)`)
+	result = assertRegex.ReplaceAllString(result, `pm.expect($1, "$2").to.be.true`)
+
+	// Convert simple client.assert(condition) without message
+	simpleAssertRegex := regexp.MustCompile(`client\.assert\(([^,)]+)\)`)
+	result = simpleAssertRegex.ReplaceAllString(result, `pm.expect($1).to.be.true`)
+
+	// Convert client.log() to console.log()
+	result = strings.ReplaceAll(result, "client.log(", "console.log(")
+
+	// Convert client.global.set() to pm.globals.set()
+	result = strings.ReplaceAll(result, "client.global.set(", "pm.globals.set(")
+
+	// Convert client.global.get() to pm.globals.get()
+	result = strings.ReplaceAll(result, "client.global.get(", "pm.globals.get(")
+
+	// Convert response.status to pm.response.code
+	result = strings.ReplaceAll(result, "response.status", "pm.response.code")
+
+	// Convert response.body to pm.response.json() for JSON responses
+	// This is tricky because response.body is direct access vs pm.response.json() is a function
+	// We need to be careful with this replacement
+	result = strings.ReplaceAll(result, "response.body.", "pm.response.json().")
+	result = strings.ReplaceAll(result, "response.body)", "pm.response.json())")
+
+	// Convert response.headers.valueOf() to pm.response.headers.get()
+	result = strings.ReplaceAll(result, "response.headers.valueOf(", "pm.response.headers.get(")
+
+	// Convert utility functions
+	// $uuid() -> pm.variables.replaceIn("{{$guid}}")
+	result = strings.ReplaceAll(result, "$uuid()", `pm.variables.replaceIn("{{$guid}}")`)
+
+	// $timestamp() -> Date.now()
+	result = strings.ReplaceAll(result, "$timestamp()", "Date.now()")
+
+	// $isoTimestamp() -> new Date().toISOString()
+	result = strings.ReplaceAll(result, "$isoTimestamp()", "new Date().toISOString()")
+
+	// $randomInt(min, max) - keep as is, need to provide helper or use Math.random
+	randomIntRegex := regexp.MustCompile(`\$randomInt\((\d+),\s*(\d+)\)`)
+	result = randomIntRegex.ReplaceAllString(result, `(Math.floor(Math.random() * ($2 - $1 + 1)) + $1)`)
+
+	// $randomString(length) - convert to a simple implementation
+	randomStringRegex := regexp.MustCompile(`\$randomString\((\d+)\)`)
+	result = randomStringRegex.ReplaceAllString(result, `Array($1).fill(0).map(() => Math.random().toString(36).charAt(2)).join('')`)
+
+	// $base64(str) -> btoa(str) or require('btoa')(str) in Postman
+	result = strings.ReplaceAll(result, "$base64(", "btoa(")
+
+	// $base64Decode(str) -> atob(str)
+	result = strings.ReplaceAll(result, "$base64Decode(", "atob(")
+
+	// Hash functions - Postman uses CryptoJS
+	// $md5(str) -> CryptoJS.MD5(str).toString()
+	md5Regex := regexp.MustCompile(`\$md5\(([^)]+)\)`)
+	result = md5Regex.ReplaceAllString(result, `CryptoJS.MD5($1).toString()`)
+
+	// $sha256(str) -> CryptoJS.SHA256(str).toString()
+	sha256Regex := regexp.MustCompile(`\$sha256\(([^)]+)\)`)
+	result = sha256Regex.ReplaceAllString(result, `CryptoJS.SHA256($1).toString()`)
+
+	// $sha512(str) -> CryptoJS.SHA512(str).toString()
+	sha512Regex := regexp.MustCompile(`\$sha512\(([^)]+)\)`)
+	result = sha512Regex.ReplaceAllString(result, `CryptoJS.SHA512($1).toString()`)
+
+	return result
 }
