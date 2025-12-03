@@ -76,11 +76,22 @@ func (p *HttpRequestParser) ParseAll() ([]*models.HttpRequest, error) {
 	return result.Requests, nil
 }
 
+// DuplicateName holds information about a request with a duplicate name
+type DuplicateName struct {
+	Name   string
+	Method string
+	URL    string
+	Index  int // 0-based index of the request
+}
+
 // ParseAllWithWarnings parses all requests and returns warnings for invalid blocks
 func (p *HttpRequestParser) ParseAllWithWarnings() *ParseResult {
 	blocks := splitRequestBlocks(p.content)
 	var requests []*models.HttpRequest
 	p.warnings = []ParseWarning{} // Reset warnings
+
+	// Track names to detect duplicates
+	nameToRequests := make(map[string][]DuplicateName)
 
 	for i, block := range blocks {
 		if strings.TrimSpace(block) == "" {
@@ -92,13 +103,71 @@ func (p *HttpRequestParser) ParseAllWithWarnings() *ParseResult {
 			p.addWarning(i, 0, fmt.Sprintf("skipped invalid request block: %v", err))
 			continue
 		}
+
+		// Track request name for duplicate detection
+		reqName := req.Metadata.Name
+		if reqName == "" {
+			reqName = req.Name
+		}
+		if reqName != "" {
+			nameToRequests[reqName] = append(nameToRequests[reqName], DuplicateName{
+				Name:   reqName,
+				Method: req.Method,
+				URL:    req.URL,
+				Index:  len(requests),
+			})
+		}
+
 		requests = append(requests, req)
+	}
+
+	// Add warnings for duplicate names
+	for name, dupes := range nameToRequests {
+		if len(dupes) > 1 {
+			var details []string
+			for _, d := range dupes {
+				details = append(details, fmt.Sprintf("request %d: %s %s", d.Index+1, d.Method, d.URL))
+			}
+			p.addWarning(dupes[0].Index, 0, fmt.Sprintf(
+				"duplicate @name '%s' found in %d requests (%s). First match will be used when selecting by name",
+				name, len(dupes), strings.Join(details, "; ")))
+		}
 	}
 
 	return &ParseResult{
 		Requests: requests,
 		Warnings: p.warnings,
 	}
+}
+
+// FindDuplicateNames returns a map of duplicate names to their occurrences
+func FindDuplicateNames(requests []*models.HttpRequest) map[string][]DuplicateName {
+	nameToRequests := make(map[string][]DuplicateName)
+
+	for i, req := range requests {
+		reqName := req.Metadata.Name
+		if reqName == "" {
+			reqName = req.Name
+		}
+		if reqName != "" {
+			nameToRequests[reqName] = append(nameToRequests[reqName], DuplicateName{
+				Name:   reqName,
+				Method: req.Method,
+				URL:    req.URL,
+				Index:  i,
+			})
+		}
+	}
+
+	// Filter to only include duplicates
+	duplicates := make(map[string][]DuplicateName)
+	for name, dupes := range nameToRequests {
+		if len(dupes) > 1 {
+			duplicates[name] = dupes
+		}
+	}
+
+	return duplicates
 }
 
 // splitRequestBlocks splits content by ### delimiter
@@ -388,7 +457,12 @@ func applyMetadata(metadata *models.RequestMetadata, meta map[string]string) {
 		case "name":
 			metadata.Name = v
 		case "note":
-			metadata.Note = v
+			// Concatenate multiple notes with newlines
+			if metadata.Note != "" {
+				metadata.Note = metadata.Note + "\n" + v
+			} else {
+				metadata.Note = v
+			}
 		case "no-redirect":
 			metadata.NoRedirect = true
 		case "no-cookie-jar":

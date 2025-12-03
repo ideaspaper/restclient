@@ -584,3 +584,119 @@ func parseTime(s string) (t time.Time) {
 	t, _ = time.Parse(time.RFC3339, s)
 	return
 }
+
+func TestParseFileVariablesWithDuplicates(t *testing.T) {
+	tests := []struct {
+		name           string
+		content        string
+		wantVars       map[string]string
+		wantDuplicates int
+	}{
+		{
+			name: "no duplicates",
+			content: `@baseUrl = https://api.example.com
+@token = abc123`,
+			wantVars: map[string]string{
+				"baseUrl": "https://api.example.com",
+				"token":   "abc123",
+			},
+			wantDuplicates: 0,
+		},
+		{
+			name: "single duplicate",
+			content: `@baseUrl = https://api.example.com
+@baseUrl = https://api.staging.com`,
+			wantVars: map[string]string{
+				"baseUrl": "https://api.staging.com", // Last wins
+			},
+			wantDuplicates: 1,
+		},
+		{
+			name: "multiple duplicates same variable",
+			content: `@baseUrl = https://api.example.com
+@baseUrl = https://api.staging.com
+@baseUrl = https://api.dev.com`,
+			wantVars: map[string]string{
+				"baseUrl": "https://api.dev.com", // Last wins
+			},
+			wantDuplicates: 2,
+		},
+		{
+			name: "multiple different duplicates",
+			content: `@baseUrl = https://api.example.com
+@token = abc123
+@baseUrl = https://api.staging.com
+@token = xyz789`,
+			wantVars: map[string]string{
+				"baseUrl": "https://api.staging.com",
+				"token":   "xyz789",
+			},
+			wantDuplicates: 2,
+		},
+		{
+			name: "mixed with requests",
+			content: `@baseUrl = https://api.example.com
+@token = abc123
+
+GET {{baseUrl}}/users
+
+###
+
+@baseUrl = https://api.staging.com
+
+POST {{baseUrl}}/users`,
+			wantVars: map[string]string{
+				"baseUrl": "https://api.staging.com",
+				"token":   "abc123",
+			},
+			wantDuplicates: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseFileVariablesWithDuplicates(tt.content)
+
+			// Check variables
+			if len(result.Variables) != len(tt.wantVars) {
+				t.Errorf("ParseFileVariablesWithDuplicates() got %d variables, want %d",
+					len(result.Variables), len(tt.wantVars))
+			}
+
+			for k, want := range tt.wantVars {
+				if got := result.Variables[k]; got != want {
+					t.Errorf("ParseFileVariablesWithDuplicates() variable '%s' = %q, want %q",
+						k, got, want)
+				}
+			}
+
+			// Check duplicates count
+			if len(result.Duplicates) != tt.wantDuplicates {
+				t.Errorf("ParseFileVariablesWithDuplicates() got %d duplicates, want %d",
+					len(result.Duplicates), tt.wantDuplicates)
+			}
+		})
+	}
+}
+
+func TestDuplicateVariableDetails(t *testing.T) {
+	content := `@baseUrl = https://api.example.com
+@baseUrl = https://api.staging.com`
+
+	result := ParseFileVariablesWithDuplicates(content)
+
+	if len(result.Duplicates) != 1 {
+		t.Fatalf("Expected 1 duplicate, got %d", len(result.Duplicates))
+	}
+
+	dup := result.Duplicates[0]
+	if dup.Name != "baseUrl" {
+		t.Errorf("Duplicate Name = %q, want %q", dup.Name, "baseUrl")
+	}
+	if dup.OldValue != "https://api.example.com" {
+		t.Errorf("Duplicate OldValue = %q, want %q", dup.OldValue, "https://api.example.com")
+	}
+	if dup.NewValue != "https://api.staging.com" {
+		t.Errorf("Duplicate NewValue = %q, want %q", dup.NewValue, "https://api.staging.com")
+	}
+}

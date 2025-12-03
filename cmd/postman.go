@@ -254,5 +254,22 @@ func runPostmanExport(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Variables: %d\n", result.VariablesCount)
 	fmt.Printf("  Output:    %s\n", result.CollectionPath)
 
+	// Print variable conflict warnings
+	if len(result.VariableConflicts) > 0 {
+		fmt.Printf("\nWarnings: Variable conflicts detected (%d)\n", len(result.VariableConflicts))
+		fmt.Printf("  When the same variable exists in multiple files with different values,\n")
+		fmt.Printf("  the value from the first file is used.\n\n")
+		for _, conflict := range result.VariableConflicts {
+			fmt.Printf("  Variable '%s':\n", conflict.Name)
+			fmt.Printf("    Using: %q (from %s)\n", conflict.UsedValue, conflict.UsedFile)
+			fmt.Printf("    Conflicting values:\n")
+			for i, file := range conflict.Files {
+				if file != conflict.UsedFile {
+					fmt.Printf("      - %q (from %s)\n", conflict.Values[i], file)
+				}
+			}
+		}
+	}
+
 	return nil
 }

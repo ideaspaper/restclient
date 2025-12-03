@@ -1665,3 +1665,288 @@ func TestReverseRoundTripWithStringHost(t *testing.T) {
 		}
 	}
 }
+
+func TestNameTracker(t *testing.T) {
+	tests := []struct {
+		name       string
+		inputNames []string
+		wantNames  []string
+	}{
+		{
+			name:       "no duplicates",
+			inputNames: []string{"first", "second", "third"},
+			wantNames:  []string{"first", "second", "third"},
+		},
+		{
+			name:       "two same names",
+			inputNames: []string{"login", "login"},
+			wantNames:  []string{"login", "login_2"},
+		},
+		{
+			name:       "three same names",
+			inputNames: []string{"test", "test", "test"},
+			wantNames:  []string{"test", "test_2", "test_3"},
+		},
+		{
+			name:       "mixed duplicates",
+			inputNames: []string{"auth", "users", "auth", "users", "auth"},
+			wantNames:  []string{"auth", "users", "auth_2", "users_2", "auth_3"},
+		},
+		{
+			name:       "empty name",
+			inputNames: []string{"", "test", ""},
+			wantNames:  []string{"", "test", ""},
+		},
+		{
+			name:       "single name",
+			inputNames: []string{"only"},
+			wantNames:  []string{"only"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tracker := NewNameTracker()
+			gotNames := make([]string, len(tt.inputNames))
+
+			for i, name := range tt.inputNames {
+				gotNames[i] = tracker.GetUniqueName(name)
+			}
+
+			for i, want := range tt.wantNames {
+				if gotNames[i] != want {
+					t.Errorf("GetUniqueName() at index %d = %q, want %q", i, gotNames[i], want)
+				}
+			}
+		})
+	}
+}
+
+func TestImportDuplicateNames(t *testing.T) {
+	// Create a collection with duplicate names
+	collectionJSON := `{
+		"info": {
+			"name": "Duplicate Names Test",
+			"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+		},
+		"item": [
+			{
+				"name": "Login",
+				"request": {
+					"method": "POST",
+					"url": "https://api.example.com/login"
+				}
+			},
+			{
+				"name": "Login",
+				"request": {
+					"method": "POST",
+					"url": "https://api.example.com/login-v2"
+				}
+			},
+			{
+				"name": "Login",
+				"request": {
+					"method": "POST",
+					"url": "https://api.example.com/login-v3"
+				}
+			},
+			{
+				"name": "Users",
+				"request": {
+					"method": "GET",
+					"url": "https://api.example.com/users"
+				}
+			}
+		]
+	}`
+
+	// Create temp dir
+	tmpDir, err := os.MkdirTemp("", "postman-import-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Write collection file
+	collectionPath := filepath.Join(tmpDir, "collection.json")
+	if err := os.WriteFile(collectionPath, []byte(collectionJSON), 0644); err != nil {
+		t.Fatalf("Failed to write collection file: %v", err)
+	}
+
+	// Import with single file mode
+	opts := ImportOptions{
+		OutputDir:        tmpDir,
+		SingleFile:       true,
+		IncludeVariables: false,
+		IncludeScripts:   false,
+	}
+
+	result, err := Import(collectionPath, opts)
+	if err != nil {
+		t.Fatalf("Import() error = %v", err)
+	}
+
+	if len(result.FilesCreated) != 1 {
+		t.Fatalf("Expected 1 file created, got %d", len(result.FilesCreated))
+	}
+
+	// Read the generated file
+	content, err := os.ReadFile(result.FilesCreated[0])
+	if err != nil {
+		t.Fatalf("Failed to read generated file: %v", err)
+	}
+
+	httpContent := string(content)
+
+	// Check that names are deduplicated
+	if !strings.Contains(httpContent, "# @name Login\n") {
+		t.Error("Expected '# @name Login' in output")
+	}
+	if !strings.Contains(httpContent, "# @name Login_2\n") {
+		t.Error("Expected '# @name Login_2' in output")
+	}
+	if !strings.Contains(httpContent, "# @name Login_3\n") {
+		t.Error("Expected '# @name Login_3' in output")
+	}
+	if !strings.Contains(httpContent, "# @name Users\n") {
+		t.Error("Expected '# @name Users' in output")
+	}
+
+	// Make sure we don't have duplicate 'Login' without suffix
+	loginCount := strings.Count(httpContent, "# @name Login\n")
+	if loginCount != 1 {
+		t.Errorf("Expected exactly 1 '# @name Login', got %d", loginCount)
+	}
+}
+
+func TestImportDuplicateNamesMultiFile(t *testing.T) {
+	// Create a collection with folders containing duplicate names
+	collectionJSON := `{
+		"info": {
+			"name": "Multi File Duplicate Test",
+			"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+		},
+		"item": [
+			{
+				"name": "Auth Folder",
+				"item": [
+					{
+						"name": "Login",
+						"request": {
+							"method": "POST",
+							"url": "https://api.example.com/auth/login"
+						}
+					},
+					{
+						"name": "Login",
+						"request": {
+							"method": "POST",
+							"url": "https://api.example.com/auth/login-alt"
+						}
+					}
+				]
+			},
+			{
+				"name": "API Folder",
+				"item": [
+					{
+						"name": "Login",
+						"request": {
+							"method": "POST",
+							"url": "https://api.example.com/api/login"
+						}
+					}
+				]
+			}
+		]
+	}`
+
+	// Create temp dir
+	tmpDir, err := os.MkdirTemp("", "postman-import-multifile-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Write collection file
+	collectionPath := filepath.Join(tmpDir, "collection.json")
+	if err := os.WriteFile(collectionPath, []byte(collectionJSON), 0644); err != nil {
+		t.Fatalf("Failed to write collection file: %v", err)
+	}
+
+	// Import with multi-file mode (default)
+	opts := ImportOptions{
+		OutputDir:        tmpDir,
+		SingleFile:       false,
+		IncludeVariables: false,
+		IncludeScripts:   false,
+	}
+
+	result, err := Import(collectionPath, opts)
+	if err != nil {
+		t.Fatalf("Import() error = %v", err)
+	}
+
+	// Should create files for each folder
+	if len(result.FilesCreated) < 2 {
+		t.Fatalf("Expected at least 2 files created, got %d", len(result.FilesCreated))
+	}
+
+	// Check Auth Folder file - should have Login and Login_2 (same file)
+	authFilePath := filepath.Join(tmpDir, "Multi_File_Duplicate_Test", "Auth_Folder", "Auth_Folder.http")
+	if _, err := os.Stat(authFilePath); os.IsNotExist(err) {
+		// Try alternative path structure
+		authFilePath = ""
+		for _, f := range result.FilesCreated {
+			if strings.Contains(f, "Auth") {
+				authFilePath = f
+				break
+			}
+		}
+	}
+
+	if authFilePath != "" {
+		content, err := os.ReadFile(authFilePath)
+		if err != nil {
+			t.Fatalf("Failed to read auth file: %v", err)
+		}
+
+		httpContent := string(content)
+
+		// In Auth folder, we should have Login and Login_2
+		if !strings.Contains(httpContent, "# @name Login\n") {
+			t.Error("Auth file: Expected '# @name Login'")
+		}
+		if !strings.Contains(httpContent, "# @name Login_2\n") {
+			t.Error("Auth file: Expected '# @name Login_2'")
+		}
+	}
+
+	// Check API Folder file - should have just Login (different file = fresh namespace)
+	apiFilePath := ""
+	for _, f := range result.FilesCreated {
+		if strings.Contains(f, "API") {
+			apiFilePath = f
+			break
+		}
+	}
+
+	if apiFilePath != "" {
+		content, err := os.ReadFile(apiFilePath)
+		if err != nil {
+			t.Fatalf("Failed to read api file: %v", err)
+		}
+
+		httpContent := string(content)
+
+		// In API folder, we should have just Login (no _2 because it's a separate file)
+		if !strings.Contains(httpContent, "# @name Login\n") {
+			t.Error("API file: Expected '# @name Login'")
+		}
+		// Should NOT have Login_2 because it's a separate file with fresh namespace
+		if strings.Contains(httpContent, "# @name Login_2") {
+			t.Error("API file: Should NOT have '# @name Login_2' (separate file = separate namespace)")
+		}
+	}
+}

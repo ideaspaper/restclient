@@ -1331,3 +1331,264 @@ POST https://api.example.com/data`
 		t.Errorf("Expected 1 warning, got %d", len(result.Warnings))
 	}
 }
+
+func TestFindDuplicateNames(t *testing.T) {
+	tests := []struct {
+		name           string
+		content        string
+		wantDuplicates map[string]int // name -> count of duplicates
+	}{
+		{
+			name: "no duplicates",
+			content: `# @name first
+GET https://api.example.com/first
+
+###
+
+# @name second
+GET https://api.example.com/second`,
+			wantDuplicates: map[string]int{},
+		},
+		{
+			name: "two requests with same name",
+			content: `# @name login
+POST https://api.example.com/login
+
+###
+
+# @name login
+POST https://api.example.com/login-v2`,
+			wantDuplicates: map[string]int{"login": 2},
+		},
+		{
+			name: "three requests with same name",
+			content: `# @name test
+GET https://api.example.com/test1
+
+###
+
+# @name test
+GET https://api.example.com/test2
+
+###
+
+# @name test
+GET https://api.example.com/test3`,
+			wantDuplicates: map[string]int{"test": 3},
+		},
+		{
+			name: "multiple duplicate groups",
+			content: `# @name auth
+POST https://api.example.com/auth
+
+###
+
+# @name users
+GET https://api.example.com/users
+
+###
+
+# @name auth
+POST https://api.example.com/auth-v2
+
+###
+
+# @name users
+GET https://api.example.com/users-v2`,
+			wantDuplicates: map[string]int{"auth": 2, "users": 2},
+		},
+		{
+			name: "mixed named and unnamed requests",
+			content: `# @name login
+POST https://api.example.com/login
+
+###
+
+GET https://api.example.com/unnamed
+
+###
+
+# @name login
+POST https://api.example.com/login-v2`,
+			wantDuplicates: map[string]int{"login": 2},
+		},
+		{
+			name: "all unnamed requests",
+			content: `GET https://api.example.com/first
+
+###
+
+GET https://api.example.com/second`,
+			wantDuplicates: map[string]int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewHttpRequestParser(tt.content, nil, "")
+			result := parser.ParseAllWithWarnings()
+
+			duplicates := FindDuplicateNames(result.Requests)
+
+			// Check that we got the expected number of duplicate groups
+			if len(duplicates) != len(tt.wantDuplicates) {
+				t.Errorf("FindDuplicateNames() got %d duplicate groups, want %d", len(duplicates), len(tt.wantDuplicates))
+			}
+
+			// Check each expected duplicate
+			for name, wantCount := range tt.wantDuplicates {
+				if dupes, ok := duplicates[name]; ok {
+					if len(dupes) != wantCount {
+						t.Errorf("FindDuplicateNames() name '%s' has %d occurrences, want %d", name, len(dupes), wantCount)
+					}
+				} else {
+					t.Errorf("FindDuplicateNames() expected duplicate name '%s' not found", name)
+				}
+			}
+		})
+	}
+}
+
+func TestDuplicateNameWarnings(t *testing.T) {
+	content := `# @name login
+POST https://api.example.com/login
+
+###
+
+# @name login
+POST https://api.example.com/login-v2
+
+###
+
+# @name other
+GET https://api.example.com/other`
+
+	parser := NewHttpRequestParser(content, nil, "")
+	result := parser.ParseAllWithWarnings()
+
+	// Should have 3 requests
+	if len(result.Requests) != 3 {
+		t.Errorf("Expected 3 requests, got %d", len(result.Requests))
+	}
+
+	// Should have a warning about duplicate 'login' name
+	foundDuplicateWarning := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w.Message, "duplicate @name 'login'") {
+			foundDuplicateWarning = true
+			break
+		}
+	}
+
+	if !foundDuplicateWarning {
+		t.Error("Expected warning about duplicate @name 'login', but none found")
+	}
+}
+
+func TestDuplicateNameDetails(t *testing.T) {
+	content := `# @name test
+GET https://api.example.com/first
+
+###
+
+# @name test
+POST https://api.example.com/second`
+
+	parser := NewHttpRequestParser(content, nil, "")
+	result := parser.ParseAllWithWarnings()
+
+	duplicates := FindDuplicateNames(result.Requests)
+
+	if len(duplicates) != 1 {
+		t.Fatalf("Expected 1 duplicate group, got %d", len(duplicates))
+	}
+
+	dupes := duplicates["test"]
+	if len(dupes) != 2 {
+		t.Fatalf("Expected 2 duplicates for 'test', got %d", len(dupes))
+	}
+
+	// Check first duplicate
+	if dupes[0].Method != "GET" {
+		t.Errorf("First duplicate method = %s, want GET", dupes[0].Method)
+	}
+	if dupes[0].URL != "https://api.example.com/first" {
+		t.Errorf("First duplicate URL = %s, want https://api.example.com/first", dupes[0].URL)
+	}
+	if dupes[0].Index != 0 {
+		t.Errorf("First duplicate Index = %d, want 0", dupes[0].Index)
+	}
+
+	// Check second duplicate
+	if dupes[1].Method != "POST" {
+		t.Errorf("Second duplicate method = %s, want POST", dupes[1].Method)
+	}
+	if dupes[1].URL != "https://api.example.com/second" {
+		t.Errorf("Second duplicate URL = %s, want https://api.example.com/second", dupes[1].URL)
+	}
+	if dupes[1].Index != 1 {
+		t.Errorf("Second duplicate Index = %d, want 1", dupes[1].Index)
+	}
+}
+
+func TestNoteConcatenation(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantNote string
+	}{
+		{
+			name: "single note",
+			input: `# @name test
+# @note This is a single note
+GET https://api.example.com`,
+			wantNote: "This is a single note",
+		},
+		{
+			name: "two notes concatenated",
+			input: `# @name test
+# @note First line of the note
+# @note Second line of the note
+GET https://api.example.com`,
+			wantNote: "First line of the note\nSecond line of the note",
+		},
+		{
+			name: "three notes concatenated",
+			input: `# @name test
+# @note Line one
+# @note Line two
+# @note Line three
+GET https://api.example.com`,
+			wantNote: "Line one\nLine two\nLine three",
+		},
+		{
+			name: "notes with other metadata in between",
+			input: `# @name test
+# @note First note
+# @no-redirect
+# @note Second note
+GET https://api.example.com`,
+			wantNote: "First note\nSecond note",
+		},
+		{
+			name: "no note",
+			input: `# @name test
+GET https://api.example.com`,
+			wantNote: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewHttpRequestParser(tt.input, nil, "")
+			req, err := parser.ParseRequest(tt.input)
+			if err != nil {
+				t.Fatalf("ParseRequest() error = %v", err)
+			}
+
+			if req.Metadata.Note != tt.wantNote {
+				t.Errorf("Note = %q, want %q", req.Metadata.Note, tt.wantNote)
+			}
+		})
+	}
+}

@@ -40,9 +40,19 @@ func DefaultExportOptions() ExportOptions {
 
 // ExportResult contains information about the export
 type ExportResult struct {
-	RequestsCount  int
-	VariablesCount int
-	CollectionPath string
+	RequestsCount     int
+	VariablesCount    int
+	CollectionPath    string
+	VariableConflicts []VariableConflict
+}
+
+// VariableConflict represents a variable that exists in multiple files with different values
+type VariableConflict struct {
+	Name      string
+	Files     []string
+	Values    []string
+	UsedValue string
+	UsedFile  string
 }
 
 // Export converts one or more .http files to a Postman collection
@@ -71,8 +81,12 @@ func Export(httpFiles []string, outputPath string, opts ExportOptions) (*ExportR
 
 	collection.Info.PostmanID = uuid.New().String()
 
-	// Collect all variables from all files
+	// Collect all variables from all files, tracking sources for conflict detection
 	allVariables := make(map[string]string)
+	variableSources := make(map[string][]struct {
+		file  string
+		value string
+	})
 
 	for _, httpFile := range httpFiles {
 		content, err := os.ReadFile(httpFile)
@@ -84,7 +98,16 @@ func Export(httpFiles []string, outputPath string, opts ExportOptions) (*ExportR
 		if opts.IncludeVariables {
 			fileVars := variables.ParseFileVariables(string(content))
 			for k, v := range fileVars {
-				allVariables[k] = v
+				// Track source for conflict detection
+				variableSources[k] = append(variableSources[k], struct {
+					file  string
+					value string
+				}{file: httpFile, value: v})
+
+				// First file wins
+				if _, exists := allVariables[k]; !exists {
+					allVariables[k] = v
+				}
 			}
 		}
 
@@ -101,6 +124,36 @@ func Export(httpFiles []string, outputPath string, opts ExportOptions) (*ExportR
 			item := convertRequestToItem(req, opts)
 			collection.Item = append(collection.Item, item)
 			result.RequestsCount++
+		}
+	}
+
+	// Detect variable conflicts (same name, different values across files)
+	if opts.IncludeVariables {
+		for varName, sources := range variableSources {
+			if len(sources) > 1 {
+				// Check if values differ
+				firstValue := sources[0].value
+				hasConflict := false
+				for _, src := range sources[1:] {
+					if src.value != firstValue {
+						hasConflict = true
+						break
+					}
+				}
+
+				if hasConflict {
+					conflict := VariableConflict{
+						Name:      varName,
+						UsedValue: allVariables[varName],
+						UsedFile:  sources[0].file,
+					}
+					for _, src := range sources {
+						conflict.Files = append(conflict.Files, src.file)
+						conflict.Values = append(conflict.Values, src.value)
+					}
+					result.VariableConflicts = append(result.VariableConflicts, conflict)
+				}
+			}
 		}
 	}
 

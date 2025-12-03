@@ -23,6 +23,35 @@ type ImportOptions struct {
 	IncludeScripts bool
 }
 
+// NameTracker tracks used names and provides unique names for duplicates
+type NameTracker struct {
+	usedNames map[string]int
+}
+
+// NewNameTracker creates a new name tracker
+func NewNameTracker() *NameTracker {
+	return &NameTracker{
+		usedNames: make(map[string]int),
+	}
+}
+
+// GetUniqueName returns a unique name, appending _2, _3, etc. for duplicates
+func (nt *NameTracker) GetUniqueName(name string) string {
+	if name == "" {
+		return ""
+	}
+
+	count, exists := nt.usedNames[name]
+	if !exists {
+		nt.usedNames[name] = 1
+		return name
+	}
+
+	// Increment count and return unique name
+	nt.usedNames[name] = count + 1
+	return fmt.Sprintf("%s_%d", name, count+1)
+}
+
 // DefaultImportOptions returns sensible defaults
 func DefaultImportOptions() ImportOptions {
 	return ImportOptions{
@@ -144,11 +173,14 @@ func processItems(collection *Collection, items []Item, currentDir string, rootD
 			writeVariables(&content, collection.Variable)
 		}
 
+		// Create name tracker for deduplication (per file)
+		nameTracker := NewNameTracker()
+
 		for i, item := range rootRequests {
 			if i > 0 {
 				content.WriteString("\n###\n\n")
 			}
-			writeRequest(&content, &item, collection.Auth, opts)
+			writeRequest(&content, &item, collection.Auth, opts, nameTracker)
 		}
 
 		// Determine filename
@@ -186,14 +218,17 @@ func generateHttpFile(collection *Collection, opts ImportOptions) string {
 		writeVariables(&content, collection.Variable)
 	}
 
+	// Create name tracker for deduplication
+	nameTracker := NewNameTracker()
+
 	// Write all requests
-	writeItems(&content, collection.Item, collection.Auth, opts, 0)
+	writeItems(&content, collection.Item, collection.Auth, opts, 0, nameTracker)
 
 	return content.String()
 }
 
 // writeItems recursively writes items to the content builder
-func writeItems(content *strings.Builder, items []Item, collectionAuth *Auth, opts ImportOptions, depth int) {
+func writeItems(content *strings.Builder, items []Item, collectionAuth *Auth, opts ImportOptions, depth int, nameTracker *NameTracker) {
 	first := true
 	for _, item := range items {
 		if item.IsFolder() {
@@ -215,12 +250,12 @@ func writeItems(content *strings.Builder, items []Item, collectionAuth *Auth, op
 			}
 
 			// Recursively write folder items
-			writeItems(content, item.Item, collectionAuth, opts, depth+1)
+			writeItems(content, item.Item, collectionAuth, opts, depth+1, nameTracker)
 		} else {
 			if !first {
 				content.WriteString("\n###\n\n")
 			}
-			writeRequest(content, &item, collectionAuth, opts)
+			writeRequest(content, &item, collectionAuth, opts, nameTracker)
 		}
 		first = false
 	}
@@ -253,15 +288,16 @@ func writeComment(content *strings.Builder, text string) {
 }
 
 // writeRequest writes a single request item
-func writeRequest(content *strings.Builder, item *Item, collectionAuth *Auth, opts ImportOptions) {
+func writeRequest(content *strings.Builder, item *Item, collectionAuth *Auth, opts ImportOptions, nameTracker *NameTracker) {
 	req := item.Request
 	if req == nil {
 		return
 	}
 
-	// Write request name metadata
+	// Write request name metadata (with deduplication)
 	if item.Name != "" {
-		content.WriteString(fmt.Sprintf("# @name %s\n", item.Name))
+		uniqueName := nameTracker.GetUniqueName(item.Name)
+		content.WriteString(fmt.Sprintf("# @name %s\n", uniqueName))
 	}
 
 	// Write description as note

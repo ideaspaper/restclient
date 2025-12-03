@@ -37,6 +37,7 @@ var (
 	skipValidate bool
 	sessionName  string
 	noSession    bool
+	strictMode   bool
 )
 
 // sendCmd represents the send command
@@ -84,6 +85,7 @@ func init() {
 	sendCmd.Flags().BoolVar(&skipValidate, "skip-validate", false, "skip request validation")
 	sendCmd.Flags().StringVar(&sessionName, "session", "", "use named session instead of directory-based session")
 	sendCmd.Flags().BoolVar(&noSession, "no-session", false, "don't load or save session state (cookies and variables)")
+	sendCmd.Flags().BoolVar(&strictMode, "strict", false, "error on duplicate @name values instead of warning")
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -108,8 +110,22 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
 
-	// Parse file variables
-	fileVars := variables.ParseFileVariables(string(content))
+	// Parse file variables with duplicate detection
+	fileVarsResult := variables.ParseFileVariablesWithDuplicates(string(content))
+	fileVars := fileVarsResult.Variables
+
+	// Warn about duplicate file variables
+	if len(fileVarsResult.Duplicates) > 0 {
+		for _, dup := range fileVarsResult.Duplicates {
+			msg := fmt.Sprintf("duplicate file variable '@%s': value '%s' overwritten with '%s'",
+				dup.Name, dup.OldValue, dup.NewValue)
+			if useColors() {
+				warnColor.Fprintf(os.Stderr, "Warning: %s\n", msg)
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", msg)
+			}
+		}
+	}
 
 	// Create variable processor
 	varProcessor := variables.NewVariableProcessor()
@@ -123,6 +139,42 @@ func runSend(cmd *cobra.Command, args []string) error {
 	httpParser := parser.NewHttpRequestParser(string(content), cfg.DefaultHeaders, filepath.Dir(filePath))
 	parseResult := httpParser.ParseAllWithWarnings()
 	requests := parseResult.Requests
+
+	// Check for duplicate @name values
+	duplicates := parser.FindDuplicateNames(requests)
+	if len(duplicates) > 0 {
+		errColor := color.New(color.FgRed)
+
+		for name, dupes := range duplicates {
+			var details []string
+			for _, d := range dupes {
+				details = append(details, fmt.Sprintf("request %d: %s %s", d.Index+1, d.Method, d.URL))
+			}
+			msg := fmt.Sprintf("duplicate @name '%s' found in %d requests:\n", name, len(dupes))
+			for _, detail := range details {
+				msg += fmt.Sprintf("  - %s\n", detail)
+			}
+			msg += "First match will be used when selecting by name."
+
+			if strictMode {
+				if useColors() {
+					errColor.Fprintf(os.Stderr, "Error: %s\n", msg)
+				} else {
+					fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
+				}
+			} else {
+				if useColors() {
+					warnColor.Fprintf(os.Stderr, "Warning: %s\n", msg)
+				} else {
+					fmt.Fprintf(os.Stderr, "Warning: %s\n", msg)
+				}
+			}
+		}
+
+		if strictMode {
+			return fmt.Errorf("duplicate @name values found (use without --strict to continue with warnings)")
+		}
+	}
 
 	// Display parsing warnings in verbose mode
 	if verbose && len(parseResult.Warnings) > 0 {

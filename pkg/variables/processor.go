@@ -687,9 +687,29 @@ func valueToString(v any) (string, error) {
 	}
 }
 
+// DuplicateVariable holds information about a duplicate variable
+type DuplicateVariable struct {
+	Name     string
+	OldValue string
+	NewValue string
+}
+
+// ParseFileVariablesResult contains parsed variables and any duplicates found
+type ParseFileVariablesResult struct {
+	Variables  map[string]string
+	Duplicates []DuplicateVariable
+}
+
 // ParseFileVariables parses file variables from content
 func ParseFileVariables(content string) map[string]string {
+	result := ParseFileVariablesWithDuplicates(content)
+	return result.Variables
+}
+
+// ParseFileVariablesWithDuplicates parses file variables and returns duplicate information
+func ParseFileVariablesWithDuplicates(content string) *ParseFileVariablesResult {
 	vars := make(map[string]string)
+	var duplicates []DuplicateVariable
 
 	// Match @variableName = value
 	re := regexp.MustCompile(`(?m)^\s*@([^\s=]+)\s*=\s*(.*?)\s*$`)
@@ -701,10 +721,23 @@ func ParseFileVariables(content string) map[string]string {
 
 		// Process escape sequences
 		value = processEscapes(value)
+
+		// Check for duplicate
+		if oldValue, exists := vars[name]; exists {
+			duplicates = append(duplicates, DuplicateVariable{
+				Name:     name,
+				OldValue: oldValue,
+				NewValue: value,
+			})
+		}
+
 		vars[name] = value
 	}
 
-	return vars
+	return &ParseFileVariablesResult{
+		Variables:  vars,
+		Duplicates: duplicates,
+	}
 }
 
 // processEscapes processes escape sequences in a string

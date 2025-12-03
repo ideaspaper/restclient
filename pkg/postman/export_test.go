@@ -943,6 +943,210 @@ func contains(s, substr string) bool {
 	return false
 }
 
+func TestExportVariableConflicts(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "postman-export-conflicts-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create first file with variables
+	httpContent1 := `@baseUrl = https://api.example.com
+@timeout = 30
+
+# @name GetUsers
+GET {{baseUrl}}/users
+`
+
+	// Create second file with conflicting variables
+	httpContent2 := `@baseUrl = https://api.staging.com
+@timeout = 60
+@newVar = value
+
+# @name GetPosts
+GET {{baseUrl}}/posts
+`
+
+	httpPath1 := filepath.Join(tmpDir, "users.http")
+	if err := os.WriteFile(httpPath1, []byte(httpContent1), 0644); err != nil {
+		t.Fatalf("Failed to write first .http file: %v", err)
+	}
+
+	httpPath2 := filepath.Join(tmpDir, "posts.http")
+	if err := os.WriteFile(httpPath2, []byte(httpContent2), 0644); err != nil {
+		t.Fatalf("Failed to write second .http file: %v", err)
+	}
+
+	outputPath := filepath.Join(tmpDir, "collection.json")
+	opts := DefaultExportOptions()
+	opts.IncludeVariables = true
+
+	result, err := Export([]string{httpPath1, httpPath2}, outputPath, opts)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	// Should have 3 unique variables (baseUrl, timeout, newVar)
+	if result.VariablesCount != 3 {
+		t.Errorf("Expected 3 variables, got %d", result.VariablesCount)
+	}
+
+	// Should have 2 conflicts (baseUrl and timeout have different values)
+	if len(result.VariableConflicts) != 2 {
+		t.Errorf("Expected 2 variable conflicts, got %d", len(result.VariableConflicts))
+	}
+
+	// Check conflict details
+	conflictMap := make(map[string]VariableConflict)
+	for _, c := range result.VariableConflicts {
+		conflictMap[c.Name] = c
+	}
+
+	// Check baseUrl conflict
+	if baseUrlConflict, ok := conflictMap["baseUrl"]; ok {
+		if baseUrlConflict.UsedValue != "https://api.example.com" {
+			t.Errorf("Expected baseUrl to use first file value, got %s", baseUrlConflict.UsedValue)
+		}
+		if len(baseUrlConflict.Files) != 2 {
+			t.Errorf("Expected 2 files in conflict, got %d", len(baseUrlConflict.Files))
+		}
+		if len(baseUrlConflict.Values) != 2 {
+			t.Errorf("Expected 2 values in conflict, got %d", len(baseUrlConflict.Values))
+		}
+	} else {
+		t.Error("Expected baseUrl conflict")
+	}
+
+	// Check timeout conflict
+	if timeoutConflict, ok := conflictMap["timeout"]; ok {
+		if timeoutConflict.UsedValue != "30" {
+			t.Errorf("Expected timeout to use first file value '30', got %s", timeoutConflict.UsedValue)
+		}
+	} else {
+		t.Error("Expected timeout conflict")
+	}
+
+	// Verify the collection has the first file's values
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+
+	var collection Collection
+	if err := json.Unmarshal(data, &collection); err != nil {
+		t.Fatalf("Failed to parse exported collection: %v", err)
+	}
+
+	varMap := make(map[string]string)
+	for _, v := range collection.Variable {
+		varMap[v.Key] = v.GetValue()
+	}
+
+	if varMap["baseUrl"] != "https://api.example.com" {
+		t.Errorf("Expected baseUrl from first file, got %s", varMap["baseUrl"])
+	}
+	if varMap["timeout"] != "30" {
+		t.Errorf("Expected timeout from first file, got %s", varMap["timeout"])
+	}
+	if varMap["newVar"] != "value" {
+		t.Errorf("Expected newVar value, got %s", varMap["newVar"])
+	}
+}
+
+func TestExportNoVariableConflicts(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "postman-export-no-conflicts-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create files with same variable values (no conflict)
+	httpContent1 := `@baseUrl = https://api.example.com
+
+# @name GetUsers
+GET {{baseUrl}}/users
+`
+
+	httpContent2 := `@baseUrl = https://api.example.com
+@timeout = 30
+
+# @name GetPosts
+GET {{baseUrl}}/posts
+`
+
+	httpPath1 := filepath.Join(tmpDir, "users.http")
+	if err := os.WriteFile(httpPath1, []byte(httpContent1), 0644); err != nil {
+		t.Fatalf("Failed to write first .http file: %v", err)
+	}
+
+	httpPath2 := filepath.Join(tmpDir, "posts.http")
+	if err := os.WriteFile(httpPath2, []byte(httpContent2), 0644); err != nil {
+		t.Fatalf("Failed to write second .http file: %v", err)
+	}
+
+	outputPath := filepath.Join(tmpDir, "collection.json")
+	opts := DefaultExportOptions()
+
+	result, err := Export([]string{httpPath1, httpPath2}, outputPath, opts)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	// No conflicts since baseUrl has same value in both files
+	if len(result.VariableConflicts) != 0 {
+		t.Errorf("Expected 0 variable conflicts, got %d", len(result.VariableConflicts))
+	}
+}
+
+func TestExportVariableConflictsDisabled(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "postman-export-conflicts-disabled-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create files with conflicting variables
+	httpContent1 := `@baseUrl = https://api.example.com
+
+# @name GetUsers
+GET {{baseUrl}}/users
+`
+
+	httpContent2 := `@baseUrl = https://api.staging.com
+
+# @name GetPosts
+GET {{baseUrl}}/posts
+`
+
+	httpPath1 := filepath.Join(tmpDir, "users.http")
+	if err := os.WriteFile(httpPath1, []byte(httpContent1), 0644); err != nil {
+		t.Fatalf("Failed to write first .http file: %v", err)
+	}
+
+	httpPath2 := filepath.Join(tmpDir, "posts.http")
+	if err := os.WriteFile(httpPath2, []byte(httpContent2), 0644); err != nil {
+		t.Fatalf("Failed to write second .http file: %v", err)
+	}
+
+	outputPath := filepath.Join(tmpDir, "collection.json")
+	opts := DefaultExportOptions()
+	opts.IncludeVariables = false // Disable variables
+
+	result, err := Export([]string{httpPath1, httpPath2}, outputPath, opts)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	// No conflicts when variables are disabled
+	if len(result.VariableConflicts) != 0 {
+		t.Errorf("Expected 0 variable conflicts when disabled, got %d", len(result.VariableConflicts))
+	}
+
+	if result.VariablesCount != 0 {
+		t.Errorf("Expected 0 variables when disabled, got %d", result.VariablesCount)
+	}
+}
+
 func TestRoundTrip(t *testing.T) {
 	// Test that import -> export -> import produces equivalent results
 	tmpDir, err := os.MkdirTemp("", "postman-roundtrip-test")
