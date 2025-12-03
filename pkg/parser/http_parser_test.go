@@ -193,6 +193,12 @@ func TestParseMetadata(t *testing.T) {
 			wantOK:   true,
 		},
 		{
+			name:     "no-cookie-jar metadata",
+			input:    "# @no-cookie-jar",
+			wantMeta: map[string]string{"no-cookie-jar": ""},
+			wantOK:   true,
+		},
+		{
 			name:     "note metadata",
 			input:    "# @note This is a test request",
 			wantMeta: map[string]string{"note": "This is a test request"},
@@ -1233,6 +1239,36 @@ GET https://api.example.com/valid`,
 				t.Errorf("ParseAllWithWarnings() warnings = %d, want %d", len(result.Warnings), tt.wantWarnings)
 			}
 		})
+	}
+}
+
+func TestNoCookieJarMetadata(t *testing.T) {
+	input := `# @no-cookie-jar
+GET https://api.example.com/users`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	req, err := parser.ParseRequest(input)
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	if !req.Metadata.NoCookieJar {
+		t.Error("Expected NoCookieJar to be true")
+	}
+}
+
+func TestNoRedirectMetadata(t *testing.T) {
+	input := `# @no-redirect
+GET https://api.example.com/users`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	req, err := parser.ParseRequest(input)
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	if !req.Metadata.NoRedirect {
+		t.Error("Expected NoRedirect to be true")
 	}
 }
 

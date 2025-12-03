@@ -285,10 +285,10 @@ func sendRequest(httpFilePath string, request *models.HttpRequest, cfg *config.C
 		clientCfg.FollowRedirects = false
 	}
 
-	// Handle per-request no-cookie-jar
-	if request.Metadata.NoCookieJar {
-		clientCfg.RememberCookies = false
-	}
+	// Note: We don't set clientCfg.RememberCookies = false for @no-cookie-jar
+	// because the HTTP client's internal cookie jar is still needed for the
+	// request to work correctly. Instead, we just skip loading/saving cookies
+	// to/from the session (handled below with NoCookieJar checks).
 
 	httpClient, err := client.NewHttpClient(clientCfg)
 	if err != nil {
