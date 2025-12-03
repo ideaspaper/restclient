@@ -33,8 +33,8 @@ Examples:
   # List last 5 requests
   restclient history list --limit 5
 
-  # Show details of a specific request
-  restclient history show 0
+  # Show details of a specific request (1-based index)
+  restclient history show 1
 
   # Clear all history
   restclient history clear
@@ -45,8 +45,8 @@ Examples:
   # Show history statistics
   restclient history stats
 
-  # Replay a request from history
-  restclient history replay 0`,
+  # Replay a request from history (1-based index)
+  restclient history replay 1`,
 }
 
 // historyListCmd lists request history
@@ -141,6 +141,9 @@ func runHistoryList(cmd *cobra.Command, args []string) error {
 func runHistoryShow(cmd *cobra.Command, args []string) error {
 	index := 0
 	fmt.Sscanf(args[0], "%d", &index)
+
+	// Convert 1-based user input to 0-based internal index
+	index = index - 1
 
 	histMgr, err := history.NewHistoryManager("")
 	if err != nil {
@@ -271,6 +274,9 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 	index := 0
 	fmt.Sscanf(args[0], "%d", &index)
 
+	// Convert 1-based user input to 0-based internal index
+	index = index - 1
+
 	histMgr, err := history.NewHistoryManager("")
 	if err != nil {
 		return fmt.Errorf("failed to load history: %w", err)
@@ -313,19 +319,22 @@ func printHistoryItem(item models.HistoricalHttpRequest, index int, useColor boo
 	t := time.UnixMilli(item.StartTime)
 	timeStr := t.Format("2006-01-02 15:04:05")
 
+	// Display 1-based index for user-facing output
+	displayIndex := index + 1
+
 	if useColor {
 		methodColor := getMethodColor(item.Method)
 		indexColor := color.New(color.FgHiBlack)
 		timeColor := color.New(color.FgHiBlack)
 
 		fmt.Printf("%s %s %s  %s\n",
-			indexColor.Sprintf("[%d]", index),
+			indexColor.Sprintf("[%d]", displayIndex),
 			methodColor.Sprint(item.Method),
 			truncateString(item.URL, 60),
 			timeColor.Sprint(timeStr))
 	} else {
 		fmt.Printf("[%d] %s %s  %s\n",
-			index,
+			displayIndex,
 			item.Method,
 			truncateString(item.URL, 60),
 			timeStr)

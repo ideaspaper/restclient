@@ -55,7 +55,7 @@ Examples:
   # Send a request by name
   restclient send api.http --name getUsers
 
-  # Send request by index (0-based)
+  # Send request by index (1-based)
   restclient send api.http --index 2
 
   # Only show response headers
@@ -75,7 +75,7 @@ func init() {
 
 	// Send command flags
 	sendCmd.Flags().StringVarP(&requestName, "name", "n", "", "request name (from @name metadata)")
-	sendCmd.Flags().IntVarP(&requestIndex, "index", "i", 0, "request index (0-based)")
+	sendCmd.Flags().IntVarP(&requestIndex, "index", "i", 0, "request index (1-based)")
 	sendCmd.Flags().BoolVar(&showHeaders, "headers", false, "only show response headers")
 	sendCmd.Flags().BoolVar(&showBody, "body", false, "only show response body")
 	sendCmd.Flags().StringVarP(&outputFile, "output", "o", "", "save response body to file")
@@ -155,10 +155,12 @@ func runSend(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("request with name '%s' not found", requestName)
 		}
 	} else if cmd.Flags().Changed("index") {
-		if requestIndex < 0 || requestIndex >= len(requests) {
-			return fmt.Errorf("request index %d out of range (0-%d)", requestIndex, len(requests)-1)
+		// Convert 1-based user input to 0-based internal index
+		internalIndex := requestIndex - 1
+		if internalIndex < 0 || internalIndex >= len(requests) {
+			return fmt.Errorf("request index %d out of range (1-%d)", requestIndex, len(requests))
 		}
-		request = requests[requestIndex]
+		request = requests[internalIndex]
 	} else {
 		// If multiple requests, show selection
 		if len(requests) > 1 {
@@ -637,7 +639,8 @@ func selectRequest(requests []*models.HttpRequest) (*models.HttpRequest, error) 
 		if name == "" {
 			name = fmt.Sprintf("(unnamed request %d)", i+1)
 		}
-		fmt.Printf("  [%d] %s %s - %s\n", i, req.Method, truncateString(req.URL, 50), name)
+		// Display 1-based index for user-facing output
+		fmt.Printf("  [%d] %s %s - %s\n", i+1, req.Method, truncateString(req.URL, 50), name)
 	}
 
 	fmt.Println()
@@ -651,11 +654,12 @@ func selectRequest(requests []*models.HttpRequest) (*models.HttpRequest, error) 
 
 	input = strings.TrimSpace(input)
 	index, err := strconv.Atoi(input)
-	if err != nil || index < 0 || index >= len(requests) {
+	if err != nil || index < 1 || index > len(requests) {
 		return nil, fmt.Errorf("invalid selection: %s", input)
 	}
 
-	return requests[index], nil
+	// Convert 1-based user input to 0-based internal index
+	return requests[index-1], nil
 }
 
 func promptHandler(name, description string, isPassword bool) (string, error) {

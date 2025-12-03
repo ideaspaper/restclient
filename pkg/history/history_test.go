@@ -378,15 +378,16 @@ func TestFormatHistoryItem(t *testing.T) {
 		StartTime: time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC).UnixMilli(),
 	}
 
+	// Index 5 (0-based) should display as 6 (1-based)
 	formatted := FormatHistoryItem(item, 5)
 
 	if formatted == "" {
 		t.Error("FormatHistoryItem should return non-empty string")
 	}
 
-	// Should contain index, method, URL
-	if !containsIgnoreCase(formatted, "[5]") {
-		t.Error("Should contain index [5]")
+	// Should contain 1-based index, method, URL
+	if !containsIgnoreCase(formatted, "[6]") {
+		t.Error("Should contain 1-based index [6]")
 	}
 	if !containsIgnoreCase(formatted, "GET") {
 		t.Error("Should contain method GET")

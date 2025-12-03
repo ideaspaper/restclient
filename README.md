@@ -130,7 +130,7 @@ restclient send <file.http> [flags]
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--name` | `-n` | Select request by name (from `@name` metadata) |
-| `--index` | `-i` | Select request by index (0-based) |
+| `--index` | `-i` | Select request by index |
 | `--headers` | | Only show response headers |
 | `--body` | | Only show response body |
 | `--output` | `-o` | Save response body to file |
@@ -213,9 +213,9 @@ restclient history <subcommand> [args]
 | Command | Description |
 |---------|-------------|
 | `list` | List recent requests |
-| `show <index>` | Show details of a specific request |
+| `show <index>` | Show details of a specific request (1-based index) |
 | `search <query>` | Search request history |
-| `replay <index>` | Replay a request exactly as it was sent |
+| `replay <index>` | Replay a request exactly as it was sent (1-based index) |
 | `stats` | Show history statistics |
 | `clear` | Clear all history |
 
@@ -241,7 +241,7 @@ restclient history list --all
 restclient history search "api.example.com"
 
 # Replay a request (sends exact same request including cookies)
-restclient history replay 0
+restclient history replay 1
 
 # View statistics
 restclient history stats
@@ -1090,8 +1090,8 @@ restclient send api.http --name getUser
 # View history
 restclient history list
 
-# Replay last request
-restclient history replay 0
+# Replay last request (1-based index)
+restclient history replay 1
 ```
 
 ### CI/CD Usage

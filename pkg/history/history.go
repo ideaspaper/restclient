@@ -89,10 +89,10 @@ func (hm *HistoryManager) GetRecent(n int) []models.HistoricalHttpRequest {
 	return hm.items[:n]
 }
 
-// GetByIndex returns a history item by index (0 = most recent)
+// GetByIndex returns a history item by index (0-based internally, but error message shows 1-based for user)
 func (hm *HistoryManager) GetByIndex(index int) (*models.HistoricalHttpRequest, error) {
 	if index < 0 || index >= len(hm.items) {
-		return nil, fmt.Errorf("index out of range: %d (0-%d)", index, len(hm.items)-1)
+		return nil, fmt.Errorf("index out of range: valid range is 1-%d", len(hm.items))
 	}
 	return &hm.items[index], nil
 }
@@ -144,11 +144,12 @@ func (hm *HistoryManager) save() error {
 	return os.WriteFile(hm.historyPath, data, 0644)
 }
 
-// FormatHistoryItem formats a history item for display
+// FormatHistoryItem formats a history item for display (index is 0-based internally, displayed as 1-based)
 func FormatHistoryItem(item models.HistoricalHttpRequest, index int) string {
 	t := time.UnixMilli(item.StartTime)
+	// Display 1-based index for user-facing output
 	return fmt.Sprintf("[%d] %s %s - %s",
-		index,
+		index+1,
 		item.Method,
 		truncateURL(item.URL, 60),
 		t.Format("2006-01-02 15:04:05"))
