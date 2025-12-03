@@ -10,13 +10,34 @@ import (
 	"github.com/ideaspaper/restclient/pkg/config"
 	"github.com/ideaspaper/restclient/pkg/history"
 	"github.com/ideaspaper/restclient/pkg/models"
+	"github.com/ideaspaper/restclient/pkg/tui"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
 
-var (
-	historyLimit int
-	historyAll   bool
-)
+// HistoryItem implements tui.Item for historical requests
+type HistoryItem struct {
+	Request models.HistoricalHttpRequest
+	Index   int // 0-based index
+}
+
+// FilterValue returns the string used for fuzzy matching
+func (h HistoryItem) FilterValue() string {
+	t := time.UnixMilli(h.Request.StartTime)
+	timeStr := t.Format("2006-01-02 15:04:05")
+	// Include method, URL, and timestamp for matching (not index)
+	return fmt.Sprintf("%s %s %s", h.Request.Method, h.Request.URL, timeStr)
+}
+
+// Title returns the main display text (method and URL)
+func (h HistoryItem) Title() string {
+	return fmt.Sprintf("%s %s", h.Request.Method, truncateString(h.Request.URL, 50))
+}
+
+// Description returns the timestamp
+func (h HistoryItem) Description() string {
+	t := time.UnixMilli(h.Request.StartTime)
+	return t.Format("2006-01-02 15:04:05")
+}
 
 // historyCmd represents the history command
 var historyCmd = &cobra.Command{
@@ -25,14 +46,11 @@ var historyCmd = &cobra.Command{
 	Long: `View and manage request history.
 
 Examples:
-  # List recent requests
-  restclient history list
-
-  # List last 5 requests
-  restclient history list --limit 5
-
   # Show details of a specific request (1-based index)
   restclient history show 1
+
+  # Interactive selection to show request details
+  restclient history show
 
   # Clear all history
   restclient history clear
@@ -44,22 +62,28 @@ Examples:
   restclient history stats
 
   # Replay a request from history (1-based index)
-  restclient history replay 1`,
-}
+  restclient history replay 1
 
-// historyListCmd lists request history
-var historyListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List recent requests",
-	RunE:  runHistoryList,
+  # Interactive selection to replay a request
+  restclient history replay`,
 }
 
 // historyShowCmd shows details of a history item
 var historyShowCmd = &cobra.Command{
-	Use:   "show <index>",
+	Use:   "show [index]",
 	Short: "Show details of a specific request",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runHistoryShow,
+	Long: `Show details of a specific request from history.
+
+If no index is provided, an interactive selector will be shown.
+
+Examples:
+  # Show request at index 1
+  restclient history show 1
+
+  # Interactive selection
+  restclient history show`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runHistoryShow,
 }
 
 // historyClearCmd clears all history
@@ -86,69 +110,70 @@ var historyStatsCmd = &cobra.Command{
 
 // historyReplayCmd replays a request from history
 var historyReplayCmd = &cobra.Command{
-	Use:   "replay <index>",
+	Use:   "replay [index]",
 	Short: "Replay a request from history",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runHistoryReplay,
+	Long: `Replay a request from history.
+
+If no index is provided, an interactive selector will be shown.
+
+Examples:
+  # Replay request at index 1
+  restclient history replay 1
+
+  # Interactive selection
+  restclient history replay`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runHistoryReplay,
 }
 
 func init() {
 	rootCmd.AddCommand(historyCmd)
 
-	historyCmd.AddCommand(historyListCmd)
 	historyCmd.AddCommand(historyShowCmd)
 	historyCmd.AddCommand(historyClearCmd)
 	historyCmd.AddCommand(historySearchCmd)
 	historyCmd.AddCommand(historyStatsCmd)
 	historyCmd.AddCommand(historyReplayCmd)
-
-	historyListCmd.Flags().IntVarP(&historyLimit, "limit", "l", 10, "number of items to show")
-	historyListCmd.Flags().BoolVarP(&historyAll, "all", "a", false, "show all history items")
-}
-
-func runHistoryList(cmd *cobra.Command, args []string) error {
-	histMgr, err := history.NewHistoryManager("")
-	if err != nil {
-		return fmt.Errorf("failed to load history: %w", err)
-	}
-
-	var items []models.HistoricalHttpRequest
-	if historyAll {
-		items = histMgr.GetAll()
-	} else {
-		items = histMgr.GetRecent(historyLimit)
-	}
-
-	if len(items) == 0 {
-		fmt.Println("No requests in history")
-		return nil
-	}
-
-	printHeader("Request History:")
-	fmt.Println()
-
-	for i, item := range items {
-		printHistoryItem(item, i)
-	}
-
-	return nil
 }
 
 func runHistoryShow(cmd *cobra.Command, args []string) error {
-	index := 0
-	fmt.Sscanf(args[0], "%d", &index)
-
-	// Convert 1-based user input to 0-based internal index
-	index = index - 1
-
 	histMgr, err := history.NewHistoryManager("")
 	if err != nil {
 		return fmt.Errorf("failed to load history: %w", err)
 	}
 
-	item, err := histMgr.GetByIndex(index)
-	if err != nil {
-		return err
+	var item models.HistoricalHttpRequest
+
+	if len(args) == 0 {
+		// Interactive selection
+		items := histMgr.GetAll()
+		if len(items) == 0 {
+			fmt.Println("No requests in history")
+			return nil
+		}
+
+		selectedItem, err := selectHistoryItem(items)
+		if err != nil {
+			if err == tui.ErrCancelled {
+				return nil
+			}
+			return err
+		}
+		item = *selectedItem
+		fmt.Println() // Blank line after selection
+	} else {
+		// Use provided index
+		index := 0
+		fmt.Sscanf(args[0], "%d", &index)
+
+		// Convert 1-based user input to 0-based internal index
+		index = index - 1
+
+		itemPtr, err := histMgr.GetByIndex(index)
+		if err != nil {
+			return err
+		}
+		item = *itemPtr
 	}
 
 	// Print request details
@@ -259,20 +284,43 @@ func runHistoryStats(cmd *cobra.Command, args []string) error {
 }
 
 func runHistoryReplay(cmd *cobra.Command, args []string) error {
-	index := 0
-	fmt.Sscanf(args[0], "%d", &index)
-
-	// Convert 1-based user input to 0-based internal index
-	index = index - 1
-
 	histMgr, err := history.NewHistoryManager("")
 	if err != nil {
 		return fmt.Errorf("failed to load history: %w", err)
 	}
 
-	item, err := histMgr.GetByIndex(index)
-	if err != nil {
-		return err
+	var item models.HistoricalHttpRequest
+
+	if len(args) == 0 {
+		// Interactive selection
+		items := histMgr.GetAll()
+		if len(items) == 0 {
+			fmt.Println("No requests in history")
+			return nil
+		}
+
+		selectedItem, err := selectHistoryItem(items)
+		if err != nil {
+			if err == tui.ErrCancelled {
+				return nil
+			}
+			return err
+		}
+		item = *selectedItem
+		fmt.Println() // Blank line after selection
+	} else {
+		// Use provided index
+		index := 0
+		fmt.Sscanf(args[0], "%d", &index)
+
+		// Convert 1-based user input to 0-based internal index
+		index = index - 1
+
+		itemPtr, err := histMgr.GetByIndex(index)
+		if err != nil {
+			return err
+		}
+		item = *itemPtr
 	}
 
 	// Convert historical request to HttpRequest
@@ -301,6 +349,21 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 	noSession = true
 
 	return sendRequest("", request, cfg, varProcessor)
+}
+
+// selectHistoryItem shows an interactive selector for history items
+func selectHistoryItem(items []models.HistoricalHttpRequest) (*models.HistoricalHttpRequest, error) {
+	tuiItems := make([]tui.Item, len(items))
+	for i, item := range items {
+		tuiItems[i] = HistoryItem{Request: item, Index: i}
+	}
+
+	_, selectedIndex, err := tui.Run(tuiItems, useColors())
+	if err != nil {
+		return nil, err
+	}
+
+	return &items[selectedIndex], nil
 }
 
 func printHistoryItem(item models.HistoricalHttpRequest, index int) {

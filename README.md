@@ -26,6 +26,7 @@ A powerful command-line HTTP client inspired by the [VS Code REST Client](https:
 ## Features
 
 - Parse and execute requests from `.http` and `.rest` files
+- **Interactive fuzzy-search selector** for choosing requests from multi-request files or history
 - **JavaScript scripting** for testing responses and chaining requests (like Postman)
 - **Postman Collection v2.1.0 import/export** - full compatibility with Postman
 - Multiple environments with variable support
@@ -122,6 +123,8 @@ Authorization: Bearer {{token}}
 
 Send HTTP requests from `.http` or `.rest` files.
 
+When the file contains multiple requests and no `--name` or `--index` flag is provided, an interactive fuzzy-search selector is displayed.
+
 ```bash
 restclient send <file.http> [flags]
 ```
@@ -144,6 +147,9 @@ restclient send <file.http> [flags]
 
 ```bash
 # Send first request in file
+restclient send api.http
+
+# Interactive selection (when file has multiple requests)
 restclient send api.http
 
 # Send request by name
@@ -205,6 +211,8 @@ restclient env show production
 
 View and manage request history. History stores the exact request that was sent, including all headers (such as cookies from the session), so `replay` reproduces the original request exactly.
 
+When no index is provided to `show` or `replay`, an interactive fuzzy-search selector is displayed.
+
 ```bash
 restclient history <subcommand> [args]
 ```
@@ -212,35 +220,28 @@ restclient history <subcommand> [args]
 **Subcommands:**
 | Command | Description |
 |---------|-------------|
-| `list` | List recent requests |
-| `show <index>` | Show details of a specific request (1-based index) |
+| `show [index]` | Show details of a specific request, or interactive selection if no index |
 | `search <query>` | Search request history |
-| `replay <index>` | Replay a request exactly as it was sent (1-based index) |
+| `replay [index]` | Replay a request exactly as it was sent, or interactive selection if no index |
 | `stats` | Show history statistics |
 | `clear` | Clear all history |
-
-**Flags for `list`:**
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--limit` | `-l` | Number of items to show (default: 10) |
-| `--all` | `-a` | Show all history items |
 
 **Examples:**
 
 ```bash
-# List last 10 requests
-restclient history list
+# Interactive selection to show request details
+restclient history show
 
-# List last 5 requests
-restclient history list --limit 5
-
-# List all requests
-restclient history list --all
+# Show request at index 1
+restclient history show 1
 
 # Search history
 restclient history search "api.example.com"
 
-# Replay a request (sends exact same request including cookies)
+# Interactive selection to replay a request
+restclient history replay
+
+# Replay a specific request (sends exact same request including cookies)
 restclient history replay 1
 
 # View statistics

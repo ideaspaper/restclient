@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -22,8 +21,39 @@ import (
 	"github.com/ideaspaper/restclient/pkg/parser"
 	"github.com/ideaspaper/restclient/pkg/scripting"
 	"github.com/ideaspaper/restclient/pkg/session"
+	"github.com/ideaspaper/restclient/pkg/tui"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
+
+// RequestItem implements tui.Item for HTTP requests
+type RequestItem struct {
+	Request *models.HttpRequest
+	Index   int // 0-based index
+}
+
+// FilterValue returns the string used for fuzzy matching
+func (r RequestItem) FilterValue() string {
+	name := r.Request.Metadata.Name
+	if name == "" {
+		name = fmt.Sprintf("request %d", r.Index+1)
+	}
+	// Include method, URL, and name for matching (not index)
+	return fmt.Sprintf("%s %s %s", r.Request.Method, r.Request.URL, name)
+}
+
+// Title returns the main display text (method and URL)
+func (r RequestItem) Title() string {
+	return fmt.Sprintf("%s %s", r.Request.Method, truncateString(r.Request.URL, 50))
+}
+
+// Description returns the request name
+func (r RequestItem) Description() string {
+	name := r.Request.Metadata.Name
+	if name == "" {
+		return fmt.Sprintf("(unnamed request %d)", r.Index+1)
+	}
+	return name
+}
 
 var (
 	// Send command flags
@@ -217,8 +247,13 @@ func runSend(cmd *cobra.Command, args []string) error {
 		if len(requests) > 1 {
 			request, err = selectRequest(requests)
 			if err != nil {
+				if err == tui.ErrCancelled {
+					// User cancelled - exit silently
+					return nil
+				}
 				return err
 			}
+			fmt.Println() // Blank line after selection
 		} else {
 			request = requests[0]
 		}
@@ -682,40 +717,19 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 }
 
 func selectRequest(requests []*models.HttpRequest) (*models.HttpRequest, error) {
-	printHeader("Multiple requests found. Select one:")
-	fmt.Println()
-
+	// Convert requests to tui.Item slice
+	items := make([]tui.Item, len(requests))
 	for i, req := range requests {
-		name := req.Metadata.Name
-		if name == "" {
-			name = fmt.Sprintf("(unnamed request %d)", i+1)
-		}
-
-		// Display 1-based index for user-facing output
-		fmt.Printf("  %s %s %s - %s\n",
-			printListIndex(i+1),
-			printMethod(req.Method),
-			truncateString(req.URL, 50),
-			printDimText(name))
+		items[i] = RequestItem{Request: req, Index: i}
 	}
 
-	fmt.Println()
-	fmt.Print("Enter request number: ")
-
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
+	// Run the interactive selector
+	_, selectedIndex, err := tui.Run(items, useColors())
 	if err != nil {
 		return nil, err
 	}
 
-	input = strings.TrimSpace(input)
-	index, err := strconv.Atoi(input)
-	if err != nil || index < 1 || index > len(requests) {
-		return nil, fmt.Errorf("invalid selection: %s", input)
-	}
-
-	// Convert 1-based user input to 0-based internal index
-	return requests[index-1], nil
+	return requests[selectedIndex], nil
 }
 
 func promptHandler(name, description string, isPassword bool) (string, error) {
