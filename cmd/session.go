@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ideaspaper/restclient/internal/stringutil"
 	"github.com/ideaspaper/restclient/pkg/session"
 )
 
@@ -261,10 +262,7 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 
 // truncateValue truncates a string to maxLen and adds ellipsis
 func truncateValue(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
+	return stringutil.Truncate(s, maxLen)
 }
 
 // formatValue formats a value for display

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ideaspaper/restclient/internal/paths"
+	"github.com/ideaspaper/restclient/internal/stringutil"
 	"github.com/ideaspaper/restclient/pkg/models"
 )
 
@@ -27,14 +29,13 @@ type HistoryManager struct {
 // NewHistoryManager creates a new history manager
 func NewHistoryManager(dataDir string) (*HistoryManager, error) {
 	if dataDir == "" {
-		homeDir, err := os.UserHomeDir()
+		appDir, err := paths.AppDataDir("")
 		if err != nil {
-			return nil, fmt.Errorf("failed to get home directory: %w", err)
+			return nil, fmt.Errorf("failed to get app data directory: %w", err)
 		}
-		dataDir = filepath.Join(homeDir, ".restclient")
+		dataDir = appDir
 	}
 
-	// Create directory if it doesn't exist
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
@@ -44,9 +45,7 @@ func NewHistoryManager(dataDir string) (*HistoryManager, error) {
 		items:       make([]models.HistoricalHttpRequest, 0),
 	}
 
-	// Load existing history
 	if err := hm.load(); err != nil {
-		// If file doesn't exist, that's fine
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("failed to load history: %w", err)
 		}
@@ -65,10 +64,8 @@ func (hm *HistoryManager) Add(request *models.HttpRequest) error {
 		StartTime: time.Now().UnixMilli(),
 	}
 
-	// Add to beginning
 	hm.items = append([]models.HistoricalHttpRequest{item}, hm.items...)
 
-	// Trim to max items
 	if len(hm.items) > maxHistoryItems {
 		hm.items = hm.items[:maxHistoryItems]
 	}
@@ -128,10 +125,16 @@ func (hm *HistoryManager) Remove(index int) error {
 func (hm *HistoryManager) load() error {
 	data, err := os.ReadFile(hm.historyPath)
 	if err != nil {
-		return err
+		if os.IsNotExist(err) {
+			return err
+		}
+		return fmt.Errorf("failed to read history file: %w", err)
 	}
 
-	return json.Unmarshal(data, &hm.items)
+	if err := json.Unmarshal(data, &hm.items); err != nil {
+		return fmt.Errorf("failed to parse history file: %w", err)
+	}
+	return nil
 }
 
 // save saves history to file
@@ -144,10 +147,9 @@ func (hm *HistoryManager) save() error {
 	return os.WriteFile(hm.historyPath, data, 0644)
 }
 
-// FormatHistoryItem formats a history item for display (index is 0-based internally, displayed as 1-based)
+// FormatHistoryItem formats a history item for display (1-based index for users)
 func FormatHistoryItem(item models.HistoricalHttpRequest, index int) string {
 	t := time.UnixMilli(item.StartTime)
-	// Display 1-based index for user-facing output
 	return fmt.Sprintf("[%d] %s %s - %s",
 		index+1,
 		item.Method,
@@ -157,10 +159,7 @@ func FormatHistoryItem(item models.HistoricalHttpRequest, index int) string {
 
 // truncateURL truncates a URL to max length
 func truncateURL(url string, maxLen int) string {
-	if len(url) <= maxLen {
-		return url
-	}
-	return url[:maxLen-3] + "..."
+	return stringutil.Truncate(url, maxLen)
 }
 
 // containsIgnoreCase checks if s contains substr (case-insensitive)
@@ -207,7 +206,6 @@ func (hm *HistoryManager) GetStats() HistoryStats {
 	for _, item := range hm.items {
 		stats.MethodCounts[item.Method]++
 
-		// Extract domain from URL
 		domain := extractDomain(item.URL)
 		stats.DomainCounts[domain]++
 

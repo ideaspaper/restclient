@@ -135,7 +135,6 @@ func runEnvList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Sort environments
 	sort.Strings(envs)
 
 	for _, env := range envs {
@@ -326,7 +325,6 @@ func runEnvDelete(cmd *cobra.Command, args []string) error {
 }
 
 func printVariables(vars map[string]string) {
-	// Sort variable names
 	var names []string
 	for name := range vars {
 		names = append(names, name)
@@ -341,7 +339,6 @@ func printVariables(vars map[string]string) {
 }
 
 func maskValue(value string) string {
-	// Truncate long values
 	if len(value) > 50 {
 		return value[:47] + "..."
 	}

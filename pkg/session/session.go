@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/ideaspaper/restclient/internal/paths"
 )
 
 const (
@@ -45,19 +47,18 @@ type SessionManager struct {
 // If sessionName is provided, uses named session; otherwise uses directory-based session
 func NewSessionManager(baseDir, httpFilePath, sessionName string) (*SessionManager, error) {
 	if baseDir == "" {
-		homeDir, err := os.UserHomeDir()
+		appDir, err := paths.AppDataDir("")
 		if err != nil {
-			return nil, fmt.Errorf("failed to get home directory: %w", err)
+			return nil, fmt.Errorf("failed to get app data directory: %w", err)
 		}
-		baseDir = filepath.Join(homeDir, ".restclient")
+		baseDir = appDir
 	}
 
 	var sessionPath string
 	if sessionName != "" {
-		// Named session
 		sessionPath = filepath.Join(baseDir, sessionDirName, namedSessionDir, sessionName)
 	} else if httpFilePath != "" {
-		// Directory-based session (based on directory of .http file)
+		// Use directory of .http file to create a directory-specific session
 		dirPath := filepath.Dir(httpFilePath)
 		absPath, err := filepath.Abs(dirPath)
 		if err != nil {
@@ -66,7 +67,6 @@ func NewSessionManager(baseDir, httpFilePath, sessionName string) (*SessionManag
 		hash := hashPath(absPath)
 		sessionPath = filepath.Join(baseDir, sessionDirName, dirSessionsDir, hash)
 	} else {
-		// Fallback to default session
 		sessionPath = filepath.Join(baseDir, sessionDirName, namedSessionDir, "default")
 	}
 
@@ -113,10 +113,13 @@ func (sm *SessionManager) LoadCookies() error {
 	path := filepath.Join(sm.sessionPath, cookiesFileName)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read cookies file: %w", err)
 	}
 
-	return json.Unmarshal(data, &sm.cookies)
+	if err := json.Unmarshal(data, &sm.cookies); err != nil {
+		return fmt.Errorf("failed to parse cookies file: %w", err)
+	}
+	return nil
 }
 
 // SaveCookies saves cookies to disk
@@ -142,10 +145,13 @@ func (sm *SessionManager) LoadVariables() error {
 	path := filepath.Join(sm.sessionPath, varsFileName)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read variables file: %w", err)
 	}
 
-	return json.Unmarshal(data, &sm.variables)
+	if err := json.Unmarshal(data, &sm.variables); err != nil {
+		return fmt.Errorf("failed to parse variables file: %w", err)
+	}
+	return nil
 }
 
 // SaveVariables saves variables to disk
@@ -171,7 +177,6 @@ func (sm *SessionManager) GetCookiesForURL(urlStr string) []*http.Cookie {
 	}
 
 	host := parsedURL.Host
-	// Remove port if present
 	if h, _, err := splitHostPort(host); err == nil {
 		host = h
 	}
@@ -185,7 +190,6 @@ func (sm *SessionManager) GetCookiesForURL(urlStr string) []*http.Cookie {
 	now := time.Now()
 
 	for _, c := range storedCookies {
-		// Skip expired cookies
 		if !c.Expires.IsZero() && c.Expires.Before(now) {
 			continue
 		}
@@ -229,19 +233,16 @@ func (sm *SessionManager) SetCookiesFromResponse(urlStr string, cookies []*http.
 	}
 
 	host := parsedURL.Host
-	// Remove port if present
 	if h, _, err := splitHostPort(host); err == nil {
 		host = h
 	}
 
-	// Get existing cookies for this host
 	existing := sm.cookies[host]
 	cookieMap := make(map[string]Cookie)
 	for _, c := range existing {
 		cookieMap[c.Name] = c
 	}
 
-	// Update/add new cookies
 	for _, c := range cookies {
 		sameSite := ""
 		switch c.SameSite {
@@ -266,7 +267,6 @@ func (sm *SessionManager) SetCookiesFromResponse(urlStr string, cookies []*http.
 		}
 	}
 
-	// Convert map back to slice
 	var updatedCookies []Cookie
 	for _, c := range cookieMap {
 		updatedCookies = append(updatedCookies, c)
@@ -377,16 +377,15 @@ func (sm *SessionManager) GetSessionPath() string {
 // ListAllSessions returns all session directories
 func ListAllSessions(baseDir string) ([]string, error) {
 	if baseDir == "" {
-		homeDir, err := os.UserHomeDir()
+		appDir, err := paths.AppDataDir("")
 		if err != nil {
 			return nil, err
 		}
-		baseDir = filepath.Join(homeDir, ".restclient")
+		baseDir = appDir
 	}
 
 	var sessions []string
 
-	// List named sessions
 	namedPath := filepath.Join(baseDir, sessionDirName, namedSessionDir)
 	if entries, err := os.ReadDir(namedPath); err == nil {
 		for _, entry := range entries {
@@ -396,7 +395,6 @@ func ListAllSessions(baseDir string) ([]string, error) {
 		}
 	}
 
-	// List directory-based sessions
 	dirsPath := filepath.Join(baseDir, sessionDirName, dirSessionsDir)
 	if entries, err := os.ReadDir(dirsPath); err == nil {
 		for _, entry := range entries {
@@ -412,11 +410,11 @@ func ListAllSessions(baseDir string) ([]string, error) {
 // ClearAllSessions removes all session data
 func ClearAllSessions(baseDir string) error {
 	if baseDir == "" {
-		homeDir, err := os.UserHomeDir()
+		appDir, err := paths.AppDataDir("")
 		if err != nil {
 			return err
 		}
-		baseDir = filepath.Join(homeDir, ".restclient")
+		baseDir = appDir
 	}
 
 	sessionDir := filepath.Join(baseDir, sessionDirName)

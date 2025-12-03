@@ -29,6 +29,19 @@ import (
 	"github.com/ideaspaper/restclient/pkg/models"
 )
 
+// HTTPDoer defines the interface for sending HTTP requests.
+// This abstraction enables dependency injection and easier testing.
+type HTTPDoer interface {
+	Send(request *models.HttpRequest) (*models.HttpResponse, error)
+	SendWithContext(ctx context.Context, request *models.HttpRequest) (*models.HttpResponse, error)
+	GetCookies(urlStr string) []*http.Cookie
+	SetCookies(urlStr string, cookies []*http.Cookie)
+	ClearCookies()
+}
+
+// Ensure HttpClient implements HTTPDoer
+var _ HTTPDoer = (*HttpClient)(nil)
+
 // ClientConfig holds client configuration
 type ClientConfig struct {
 	Timeout         time.Duration
@@ -190,7 +203,6 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set headers
 	for k, v := range request.Headers {
 		req.Header.Set(k, v)
 	}
@@ -200,11 +212,9 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	// Track timing
 	timing := models.ResponseTiming{}
 	startTime := time.Now()
 
-	// Send request
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
@@ -213,7 +223,7 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 
 	timing.Total = time.Since(startTime)
 
-	// Check for Digest auth challenge
+	// Handle Digest auth challenge (HTTP 401)
 	if resp.StatusCode == http.StatusUnauthorized {
 		authHeader := resp.Header.Get("WWW-Authenticate")
 		if strings.HasPrefix(strings.ToLower(authHeader), "digest ") {
@@ -231,7 +241,6 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 		}
 	}
 
-	// Read response body
 	var bodyBuffer bytes.Buffer
 	reader := resp.Body
 
@@ -348,10 +357,8 @@ func (c *HttpClient) handleDigestAuth(ctx context.Context, request *models.HttpR
 		return resp, nil
 	}
 
-	// Parse challenge
 	challenge := parseDigestChallenge(authHeader)
 
-	// Build response
 	uri, _ := url.Parse(request.URL)
 	digestAuth := buildDigestResponse(
 		creds.username,
@@ -512,7 +519,7 @@ func (c *HttpClient) processAWSAuth(request *models.HttpRequest, args []string) 
 	// Parse URL to get region and service if not provided
 	parsedURL, err := url.Parse(request.URL)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse URL for AWS auth: %w", err)
 	}
 
 	if region == "" || service == "" {
@@ -562,7 +569,6 @@ func (s *awsSigner) sign(request *models.HttpRequest) error {
 	dateStamp := t.Format("20060102")
 	amzDate := t.Format("20060102T150405Z")
 
-	// Update headers
 	request.Headers["X-Amz-Date"] = amzDate
 	if s.sessionToken != "" {
 		request.Headers["X-Amz-Security-Token"] = s.sessionToken
@@ -588,7 +594,6 @@ func (s *awsSigner) sign(request *models.HttpRequest) error {
 	}
 	signedHeadersList = append(signedHeadersList, "host")
 
-	// Sort headers
 	slices.Sort(signedHeadersList)
 
 	for _, header := range signedHeadersList {
@@ -640,8 +645,6 @@ func (s *awsSigner) sign(request *models.HttpRequest) error {
 
 	return nil
 }
-
-// Helper functions
 
 func updateAuthHeader(request *models.HttpRequest, value string) {
 	for k := range request.Headers {

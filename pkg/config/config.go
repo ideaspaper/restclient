@@ -12,6 +12,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
+	"github.com/ideaspaper/restclient/internal/paths"
 	"github.com/ideaspaper/restclient/pkg/client"
 )
 
@@ -85,33 +86,35 @@ func DefaultConfig() *Config {
 	}
 }
 
-// setDefaults sets default values in viper
+// SetViperDefaults sets default values in a viper instance based on DefaultConfig.
+// This should be used by cmd/root.go to avoid duplicating default values.
+func SetViperDefaults(v *viper.Viper) {
+	defaults := DefaultConfig()
+	v.SetDefault("followRedirect", defaults.FollowRedirects)
+	v.SetDefault("timeoutInMilliseconds", defaults.TimeoutMs)
+	v.SetDefault("rememberCookiesForSubsequentRequests", defaults.RememberCookies)
+	v.SetDefault("defaultHeaders", defaults.DefaultHeaders)
+	v.SetDefault("environmentVariables", defaults.EnvironmentVariables)
+	v.SetDefault("currentEnvironment", defaults.CurrentEnvironment)
+	v.SetDefault("insecureSSL", defaults.InsecureSSL)
+	v.SetDefault("proxyStrictSSL", defaults.ProxyStrictSSL)
+	v.SetDefault("certificates", defaults.Certificates)
+	v.SetDefault("previewOption", defaults.PreviewOption)
+	v.SetDefault("showColors", defaults.ShowColors)
+}
+
+// setDefaults sets default values in viper (internal helper, uses SetViperDefaults)
 func setDefaults(v *viper.Viper) {
-	v.SetDefault("followRedirect", true)
-	v.SetDefault("timeoutInMilliseconds", 0)
-	v.SetDefault("rememberCookiesForSubsequentRequests", true)
-	v.SetDefault("defaultHeaders", map[string]string{
-		"User-Agent": "restclient-cli",
-	})
-	v.SetDefault("environmentVariables", map[string]map[string]string{
-		"$shared": {},
-	})
-	v.SetDefault("currentEnvironment", "")
-	v.SetDefault("insecureSSL", false)
-	v.SetDefault("proxyStrictSSL", true)
-	v.SetDefault("certificates", make(map[string]CertificateConfig))
-	v.SetDefault("previewOption", "full")
-	v.SetDefault("showColors", true)
+	SetViperDefaults(v)
 }
 
 // LoadConfig loads configuration from the default path using Viper
 func LoadConfig() (*Config, error) {
-	homeDir, err := os.UserHomeDir()
+	configDir, err := paths.AppDataDir("")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
+		return nil, fmt.Errorf("failed to get config directory: %w", err)
 	}
 
-	configDir := filepath.Join(homeDir, ".restclient")
 	return LoadConfigFromDir(configDir)
 }
 
@@ -218,11 +221,11 @@ func LoadConfigFromFile(filePath string) (*Config, error) {
 // Save saves the configuration to file
 func (c *Config) Save() error {
 	if c.configPath == "" {
-		homeDir, err := os.UserHomeDir()
+		configDir, err := paths.AppDataDir("")
 		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
+			return fmt.Errorf("failed to get config directory: %w", err)
 		}
-		c.configPath = filepath.Join(homeDir, ".restclient", configFileName+"."+configFileType)
+		c.configPath = filepath.Join(configDir, configFileName+"."+configFileType)
 	}
 
 	// Create directory if it doesn't exist

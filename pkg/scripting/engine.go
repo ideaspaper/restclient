@@ -1,6 +1,7 @@
 package scripting
 
 import (
+	"context"
 	"crypto/md5"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -46,11 +47,24 @@ func NewEngine() *Engine {
 
 // Execute runs a script with the given context
 func (e *Engine) Execute(script string, ctx *ScriptContext) (*ScriptResult, error) {
+	return e.ExecuteWithContext(context.Background(), script, ctx)
+}
+
+// ExecuteWithContext runs a script with the given context and supports cancellation.
+// If the context is canceled or times out, the script execution will be interrupted.
+func (e *Engine) ExecuteWithContext(ctx context.Context, script string, scriptCtx *ScriptContext) (*ScriptResult, error) {
 	if strings.TrimSpace(script) == "" {
 		return &ScriptResult{}, nil
 	}
 
-	e.context = ctx
+	// Check for context cancellation before starting
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("script execution canceled: %w", ctx.Err())
+	default:
+	}
+
+	e.context = scriptCtx
 	result := &ScriptResult{
 		Tests:      []TestResult{},
 		Logs:       []string{},
@@ -61,14 +75,27 @@ func (e *Engine) Execute(script string, ctx *ScriptContext) (*ScriptResult, erro
 	e.vm = goja.New()
 	e.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 
+	// Set up interrupt handler for context cancellation
+	go func() {
+		<-ctx.Done()
+		e.vm.Interrupt("context canceled")
+	}()
+
 	// Register global objects
-	if err := e.registerGlobals(ctx, result); err != nil {
+	if err := e.registerGlobals(scriptCtx, result); err != nil {
 		return nil, fmt.Errorf("failed to register globals: %w", err)
 	}
 
 	// Execute the script
 	_, err := e.vm.RunString(script)
 	if err != nil {
+		// Check if this was due to context cancellation
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("script execution canceled: %w", ctx.Err())
+		default:
+		}
+
 		if exception, ok := err.(*goja.Exception); ok {
 			result.Error = fmt.Errorf("script error: %s", exception.String())
 		} else {

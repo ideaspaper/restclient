@@ -8,6 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/ideaspaper/restclient/pkg/config"
 )
 
 var (
@@ -94,17 +96,8 @@ func initConfig() error {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
 
-	// Set defaults
-	v.SetDefault("followRedirect", true)
-	v.SetDefault("timeoutInMilliseconds", 0)
-	v.SetDefault("rememberCookiesForSubsequentRequests", true)
-	v.SetDefault("insecureSSL", false)
-	v.SetDefault("proxyStrictSSL", true)
-	v.SetDefault("previewOption", "full")
-	v.SetDefault("showColors", true)
-	v.SetDefault("defaultHeaders", map[string]string{
-		"User-Agent": "restclient-cli",
-	})
+	// Set defaults from centralized config
+	config.SetViperDefaults(v)
 
 	// Read config file if it exists
 	if err := v.ReadInConfig(); err != nil {

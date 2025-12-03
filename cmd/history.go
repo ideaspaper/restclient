@@ -145,7 +145,6 @@ func runHistoryShow(cmd *cobra.Command, args []string) error {
 	var item models.HistoricalHttpRequest
 
 	if len(args) == 0 {
-		// Interactive selection
 		items := histMgr.GetAll()
 		if len(items) == 0 {
 			fmt.Println("No requests in history")
@@ -162,7 +161,6 @@ func runHistoryShow(cmd *cobra.Command, args []string) error {
 		item = *selectedItem
 		fmt.Println() // Blank line after selection
 	} else {
-		// Use provided index
 		index := 0
 		fmt.Sscanf(args[0], "%d", &index)
 
@@ -176,7 +174,6 @@ func runHistoryShow(cmd *cobra.Command, args []string) error {
 		item = *itemPtr
 	}
 
-	// Print request details
 	printHeader("Request Details:")
 	fmt.Println()
 
@@ -292,7 +289,6 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 	var item models.HistoricalHttpRequest
 
 	if len(args) == 0 {
-		// Interactive selection
 		items := histMgr.GetAll()
 		if len(items) == 0 {
 			fmt.Println("No requests in history")
@@ -307,13 +303,10 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		item = *selectedItem
-		fmt.Println() // Blank line after selection
+		fmt.Println()
 	} else {
-		// Use provided index
 		index := 0
 		fmt.Sscanf(args[0], "%d", &index)
-
-		// Convert 1-based user input to 0-based internal index
 		index = index - 1
 
 		itemPtr, err := histMgr.GetByIndex(index)
@@ -323,7 +316,6 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 		item = *itemPtr
 	}
 
-	// Convert historical request to HttpRequest
 	request := &models.HttpRequest{
 		Method:  item.Method,
 		URL:     item.URL,
@@ -335,7 +327,6 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 		request.Body = strings.NewReader(item.Body)
 	}
 
-	// Load config and send
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -345,7 +336,7 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 	varProcessor.SetEnvironment(cfg.CurrentEnvironment)
 	varProcessor.SetEnvironmentVariables(cfg.EnvironmentVariables)
 
-	// Replay without session - history already contains the Cookie header that was sent
+	// History already contains the Cookie header that was sent, no session needed
 	noSession = true
 
 	return sendRequest("", request, cfg, varProcessor)

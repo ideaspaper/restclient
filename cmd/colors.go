@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/fatih/color"
+
+	"github.com/ideaspaper/restclient/internal/stringutil"
 )
 
 // useColors returns true if colored output should be used.
@@ -14,19 +16,15 @@ func useColors() bool {
 
 // Color definitions for consistent styling across commands
 var (
-	// List item colors
 	indexColor = color.New(color.FgHiBlack)
 	nameColor  = color.New(color.FgHiBlack)
 
-	// Header/title colors
 	headerColor = color.New(color.FgCyan)
 
-	// Status colors
 	successColor = color.New(color.FgGreen)
 	errorColor   = color.New(color.FgRed)
 	warnColor    = color.New(color.FgYellow)
 
-	// Value colors
 	keyColor   = color.New(color.FgCyan)
 	valueColor = color.New(color.FgWhite)
 )
@@ -121,9 +119,7 @@ func printMarker(marked bool) string {
 }
 
 // truncateString truncates a string to maxLen and adds ellipsis
+// Deprecated: Use stringutil.Truncate from pkg/internal/stringutil instead
 func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
+	return stringutil.Truncate(s, maxLen)
 }
