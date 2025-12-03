@@ -5,13 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/ideaspaper/restclient/pkg/config"
 	"github.com/ideaspaper/restclient/pkg/history"
 	"github.com/ideaspaper/restclient/pkg/models"
-	"github.com/ideaspaper/restclient/pkg/output"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
 
@@ -126,13 +124,11 @@ func runHistoryList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	formatter := output.NewFormatter(!noColor)
-
-	fmt.Println(formatter.FormatInfo("Request History:"))
+	printHeader("Request History:")
 	fmt.Println()
 
 	for i, item := range items {
-		printHistoryItem(item, i, !noColor)
+		printHistoryItem(item, i)
 	}
 
 	return nil
@@ -155,18 +151,11 @@ func runHistoryShow(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	formatter := output.NewFormatter(!noColor)
-
 	// Print request details
-	fmt.Println(formatter.FormatInfo("Request Details:"))
+	printHeader("Request Details:")
 	fmt.Println()
 
-	methodColor := color.New(color.FgGreen, color.Bold)
-	if !noColor {
-		fmt.Printf("%s %s\n", methodColor.Sprint(item.Method), item.URL)
-	} else {
-		fmt.Printf("%s %s\n", item.Method, item.URL)
-	}
+	fmt.Printf("%s %s\n", printMethod(item.Method), item.URL)
 
 	fmt.Printf("Time: %s\n", time.UnixMilli(item.StartTime).Format("2006-01-02 15:04:05"))
 	fmt.Println()
@@ -219,7 +208,7 @@ func runHistorySearch(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Found %d matching requests:\n\n", len(items))
 
 	for i, item := range items {
-		printHistoryItem(item, i, !noColor)
+		printHistoryItem(item, i)
 	}
 
 	return nil
@@ -233,8 +222,7 @@ func runHistoryStats(cmd *cobra.Command, args []string) error {
 
 	stats := histMgr.GetStats()
 
-	formatter := output.NewFormatter(!noColor)
-	fmt.Println(formatter.FormatInfo("History Statistics:"))
+	printHeader("History Statistics:")
 	fmt.Println()
 
 	fmt.Printf("Total Requests: %d\n", stats.TotalRequests)
@@ -315,47 +303,18 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 	return sendRequest("", request, cfg, varProcessor)
 }
 
-func printHistoryItem(item models.HistoricalHttpRequest, index int, useColor bool) {
+func printHistoryItem(item models.HistoricalHttpRequest, index int) {
 	t := time.UnixMilli(item.StartTime)
 	timeStr := t.Format("2006-01-02 15:04:05")
 
 	// Display 1-based index for user-facing output
 	displayIndex := index + 1
 
-	if useColor {
-		methodColor := getMethodColor(item.Method)
-		indexColor := color.New(color.FgHiBlack)
-		timeColor := color.New(color.FgHiBlack)
-
-		fmt.Printf("%s %s %s  %s\n",
-			indexColor.Sprintf("[%d]", displayIndex),
-			methodColor.Sprint(item.Method),
-			truncateString(item.URL, 60),
-			timeColor.Sprint(timeStr))
-	} else {
-		fmt.Printf("[%d] %s %s  %s\n",
-			displayIndex,
-			item.Method,
-			truncateString(item.URL, 60),
-			timeStr)
-	}
-}
-
-func getMethodColor(method string) *color.Color {
-	switch method {
-	case "GET":
-		return color.New(color.FgGreen, color.Bold)
-	case "POST":
-		return color.New(color.FgYellow, color.Bold)
-	case "PUT":
-		return color.New(color.FgBlue, color.Bold)
-	case "DELETE":
-		return color.New(color.FgRed, color.Bold)
-	case "PATCH":
-		return color.New(color.FgMagenta, color.Bold)
-	default:
-		return color.New(color.FgWhite, color.Bold)
-	}
+	fmt.Printf("%s %s %s  %s\n",
+		printListIndex(displayIndex),
+		printMethod(item.Method),
+		truncateString(item.URL, 60),
+		printDimText(timeStr))
 }
 
 func loadConfig() (*config.Config, error) {

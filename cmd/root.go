@@ -21,7 +21,6 @@ var (
 	cfgFile     string
 	environment string
 	verbose     bool
-	noColor     bool
 )
 
 // rootCmd represents the base command
@@ -65,12 +64,10 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default is $HOME/.restclient/config.json)")
 	rootCmd.PersistentFlags().StringVarP(&environment, "env", "e", "", "environment to use")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
-	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable colored output")
 
 	// Bind flags to viper
 	v.BindPFlag("environment", rootCmd.PersistentFlags().Lookup("env"))
 	v.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
-	v.BindPFlag("noColor", rootCmd.PersistentFlags().Lookup("no-color"))
 }
 
 // initConfig reads in config file and ENV variables if set

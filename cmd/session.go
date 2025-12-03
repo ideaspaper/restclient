@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/ideaspaper/restclient/pkg/session"
@@ -130,25 +129,13 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 		// Continue even if one file doesn't exist
 	}
 
-	useColors := !noColor
-
 	// Print session path
-	if useColors {
-		c := color.New(color.FgCyan, color.Bold)
-		c.Println("Session Path:")
-	} else {
-		fmt.Println("Session Path:")
-	}
+	printHeader("Session Path:")
 	fmt.Printf("  %s\n\n", sessionMgr.GetSessionPath())
 
 	// Print cookies
 	cookies := sessionMgr.GetAllCookies()
-	if useColors {
-		c := color.New(color.FgGreen, color.Bold)
-		c.Println("Cookies:")
-	} else {
-		fmt.Println("Cookies:")
-	}
+	printHeader("Cookies:")
 
 	if len(cookies) == 0 {
 		fmt.Println("  (none)")
@@ -168,12 +155,7 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 
 	// Print variables
 	variables := sessionMgr.GetAllVariables()
-	if useColors {
-		c := color.New(color.FgYellow, color.Bold)
-		c.Println("Variables:")
-	} else {
-		fmt.Println("Variables:")
-	}
+	printHeader("Variables:")
 
 	if len(variables) == 0 {
 		fmt.Println("  (none)")
@@ -256,14 +238,7 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	useColors := !noColor
-
-	if useColors {
-		c := color.New(color.FgCyan, color.Bold)
-		c.Println("Sessions:")
-	} else {
-		fmt.Println("Sessions:")
-	}
+	printHeader("Sessions:")
 
 	for _, s := range sessions {
 		parts := strings.SplitN(s, ":", 2)
@@ -272,9 +247,9 @@ func runSessionList(cmd *cobra.Command, args []string) error {
 			sessionID := parts[1]
 
 			if sessionType == "named" {
-				fmt.Printf("  [named] %s\n", sessionID)
+				fmt.Printf("  %s %s\n", printDimText("[named]"), sessionID)
 			} else {
-				fmt.Printf("  [dir]   %s\n", sessionID)
+				fmt.Printf("  %s %s\n", printDimText("[dir]  "), sessionID)
 			}
 		} else {
 			fmt.Printf("  %s\n", s)

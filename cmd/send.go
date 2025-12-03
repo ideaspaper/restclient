@@ -126,12 +126,11 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	// Display parsing warnings in verbose mode
 	if verbose && len(parseResult.Warnings) > 0 {
-		warnColor := color.New(color.FgYellow)
 		for _, w := range parseResult.Warnings {
-			if noColor || !cfg.ShowColors {
-				fmt.Fprintf(os.Stderr, "Warning: block %d: %s\n", w.BlockIndex+1, w.Message)
-			} else {
+			if useColors() {
 				warnColor.Fprintf(os.Stderr, "Warning: block %d: %s\n", w.BlockIndex+1, w.Message)
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: block %d: %s\n", w.BlockIndex+1, w.Message)
 			}
 		}
 		fmt.Fprintln(os.Stderr)
@@ -229,11 +228,10 @@ func runSend(cmd *cobra.Command, args []string) error {
 	if !skipValidate {
 		validation := request.Validate()
 		if !validation.IsValid() {
-			errColor := color.New(color.FgRed)
-			if noColor || !cfg.ShowColors {
-				fmt.Fprintln(os.Stderr, "Request validation failed:")
+			if useColors() {
+				errorColor.Fprintln(os.Stderr, "Request validation failed:")
 			} else {
-				errColor.Fprintln(os.Stderr, "Request validation failed:")
+				fmt.Fprintln(os.Stderr, "Request validation failed:")
 			}
 			for _, e := range validation.Errors {
 				fmt.Fprintf(os.Stderr, "  - %s: %s\n", e.Field, e.Message)
@@ -387,7 +385,7 @@ func sendRequest(httpFilePath string, request *models.HttpRequest, cfg *config.C
 		// Print test results
 		if len(result.Tests) > 0 {
 			fmt.Println()
-			printTestResults(result.Tests, !noColor && cfg.ShowColors)
+			printTestResults(result.Tests)
 		}
 
 		// Apply global variables set by script to variable processor
@@ -421,24 +419,24 @@ func sendRequest(httpFilePath string, request *models.HttpRequest, cfg *config.C
 	}
 
 	// Format and display response
-	formatter := output.NewFormatter(!noColor && cfg.ShowColors)
+	formatter := output.NewFormatter(useColors())
 	return displayResponse(resp, formatter)
 }
 
-func printTestResults(tests []scripting.TestResult, useColors bool) {
+func printTestResults(tests []scripting.TestResult) {
 	passColor := color.New(color.FgGreen)
 	failColor := color.New(color.FgRed)
 
 	fmt.Println("Test Results:")
 	for _, test := range tests {
 		if test.Passed {
-			if useColors {
+			if useColors() {
 				fmt.Printf("  %s %s\n", passColor.Sprint("✓"), test.Name)
 			} else {
 				fmt.Printf("  [PASS] %s\n", test.Name)
 			}
 		} else {
-			if useColors {
+			if useColors() {
 				fmt.Printf("  %s %s: %s\n", failColor.Sprint("✗"), test.Name, test.Error)
 			} else {
 				fmt.Printf("  [FAIL] %s: %s\n", test.Name, test.Error)
@@ -526,7 +524,8 @@ func printRequestInfo(request *models.HttpRequest) {
 }
 
 func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.Config) error {
-	formatter := output.NewFormatter(!noColor && cfg.ShowColors)
+	colorsEnabled := useColors() && cfg.ShowColors
+	formatter := output.NewFormatter(colorsEnabled)
 
 	// Print header
 	fmt.Println(formatter.FormatInfo("=== DRY RUN (request will not be sent) ==="))
@@ -534,10 +533,10 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 
 	// Print request line
 	c := color.New(color.FgGreen, color.Bold)
-	if noColor || !cfg.ShowColors {
-		fmt.Printf("%s %s\n", request.Method, request.URL)
-	} else {
+	if colorsEnabled {
 		c.Printf("%s %s\n", request.Method, request.URL)
+	} else {
+		fmt.Printf("%s %s\n", request.Method, request.URL)
 	}
 	fmt.Println()
 
@@ -545,10 +544,10 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 	headerColor := color.New(color.FgCyan)
 	fmt.Println("Headers:")
 	for k, v := range request.Headers {
-		if noColor || !cfg.ShowColors {
-			fmt.Printf("  %s: %s\n", k, v)
-		} else {
+		if colorsEnabled {
 			fmt.Printf("  %s: %s\n", headerColor.Sprint(k), v)
+		} else {
+			fmt.Printf("  %s: %s\n", k, v)
 		}
 	}
 
@@ -561,10 +560,10 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 			if _, exists := request.Headers[k]; exists {
 				continue
 			}
-			if noColor || !cfg.ShowColors {
-				fmt.Printf("  %s: %s\n", k, v)
-			} else {
+			if colorsEnabled {
 				fmt.Printf("  %s: %s\n", headerColor.Sprint(k), v)
+			} else {
+				fmt.Printf("  %s: %s\n", k, v)
 			}
 		}
 	}
@@ -582,10 +581,10 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 						fmt.Println()
 						fmt.Println("Session Cookies (from previous requests):")
 						for _, cookie := range cookies {
-							if noColor || !cfg.ShowColors {
-								fmt.Printf("  %s = %s\n", cookie.Name, cookie.Value)
-							} else {
+							if colorsEnabled {
 								fmt.Printf("  %s = %s\n", headerColor.Sprint(cookie.Name), cookie.Value)
+							} else {
+								fmt.Printf("  %s = %s\n", cookie.Name, cookie.Value)
 							}
 						}
 					}
@@ -597,10 +596,10 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 					fmt.Println()
 					fmt.Println("Session Variables:")
 					for k, v := range vars {
-						if noColor || !cfg.ShowColors {
-							fmt.Printf("  %s = %s\n", k, v)
-						} else {
+						if colorsEnabled {
 							fmt.Printf("  %s = %s\n", headerColor.Sprint(k), v)
+						} else {
+							fmt.Printf("  %s = %s\n", k, v)
 						}
 					}
 				}
@@ -631,7 +630,7 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 }
 
 func selectRequest(requests []*models.HttpRequest) (*models.HttpRequest, error) {
-	fmt.Println("Multiple requests found. Select one:")
+	printHeader("Multiple requests found. Select one:")
 	fmt.Println()
 
 	for i, req := range requests {
@@ -639,8 +638,13 @@ func selectRequest(requests []*models.HttpRequest) (*models.HttpRequest, error) 
 		if name == "" {
 			name = fmt.Sprintf("(unnamed request %d)", i+1)
 		}
+
 		// Display 1-based index for user-facing output
-		fmt.Printf("  [%d] %s %s - %s\n", i+1, req.Method, truncateString(req.URL, 50), name)
+		fmt.Printf("  %s %s %s - %s\n",
+			printListIndex(i+1),
+			printMethod(req.Method),
+			truncateString(req.URL, 50),
+			printDimText(name))
 	}
 
 	fmt.Println()
@@ -687,11 +691,4 @@ func promptHandler(name, description string, isPassword bool) (string, error) {
 	}
 
 	return strings.TrimSpace(input), nil
-}
-
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }

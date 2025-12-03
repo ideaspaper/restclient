@@ -5,11 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/ideaspaper/restclient/pkg/config"
-	"github.com/ideaspaper/restclient/pkg/output"
 )
 
 // envCmd represents the env command
@@ -126,9 +124,8 @@ func runEnvList(cmd *cobra.Command, args []string) error {
 	}
 
 	envs := cfg.ListEnvironments()
-	formatter := output.NewFormatter(!noColor)
 
-	fmt.Println(formatter.FormatInfo("Available Environments:"))
+	printHeader("Available Environments:")
 	fmt.Println()
 
 	if len(envs) == 0 {
@@ -142,14 +139,7 @@ func runEnvList(cmd *cobra.Command, args []string) error {
 	sort.Strings(envs)
 
 	for _, env := range envs {
-		marker := "  "
-		if env == cfg.CurrentEnvironment {
-			if !noColor {
-				marker = color.New(color.FgGreen).Sprint("* ")
-			} else {
-				marker = "* "
-			}
-		}
+		marker := printMarker(env == cfg.CurrentEnvironment)
 		fmt.Printf("%s%s\n", marker, env)
 	}
 
@@ -220,22 +210,20 @@ func runEnvShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("environment '%s' not found", envName)
 	}
 
-	formatter := output.NewFormatter(!noColor)
-
 	// Show $shared first if showing a specific environment
 	if envName != "$shared" {
 		if shared, ok := cfg.EnvironmentVariables["$shared"]; ok && len(shared) > 0 {
-			fmt.Println(formatter.FormatInfo("$shared variables:"))
-			printVariables(shared, !noColor)
+			printHeader("$shared variables:")
+			printVariables(shared)
 			fmt.Println()
 		}
 	}
 
-	fmt.Println(formatter.FormatInfo(fmt.Sprintf("Variables in '%s':", envName)))
+	printHeader(fmt.Sprintf("Variables in '%s':", envName))
 	if len(vars) == 0 {
 		fmt.Println("  (no variables)")
 	} else {
-		printVariables(vars, !noColor)
+		printVariables(vars)
 	}
 
 	return nil
@@ -337,7 +325,7 @@ func runEnvDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printVariables(vars map[string]string, useColor bool) {
+func printVariables(vars map[string]string) {
 	// Sort variable names
 	var names []string
 	for name := range vars {
@@ -345,18 +333,10 @@ func printVariables(vars map[string]string, useColor bool) {
 	}
 	sort.Strings(names)
 
-	nameColor := color.New(color.FgCyan)
-	valueColor := color.New(color.FgWhite)
-
 	for _, name := range names {
 		value := vars[name]
 		displayValue := maskValueByName(name, value)
-
-		if useColor {
-			fmt.Printf("  %s = %s\n", nameColor.Sprint(name), valueColor.Sprint(displayValue))
-		} else {
-			fmt.Printf("  %s = %s\n", name, displayValue)
-		}
+		printKeyValue(name, displayValue)
 	}
 }
 

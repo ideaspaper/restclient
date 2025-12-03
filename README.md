@@ -1033,14 +1033,13 @@ Configuration is stored in `~/.restclient/config.json`:
 
 ## Global Flags
 
-| Flag         | Short | Description                                |
-| ------------ | ----- | ------------------------------------------ |
-| `--config`   | `-c`  | Config file path                           |
-| `--env`      | `-e`  | Environment to use                         |
-| `--verbose`  | `-v`  | Verbose output (includes parsing warnings) |
-| `--no-color` |       | Disable colored output                     |
-| `--version`  |       | Show version                               |
-| `--help`     | `-h`  | Show help                                  |
+| Flag        | Short | Description                                |
+| ----------- | ----- | ------------------------------------------ |
+| `--config`  | `-c`  | Config file path                           |
+| `--env`     | `-e`  | Environment to use                         |
+| `--verbose` | `-v`  | Verbose output (includes parsing warnings) |
+| `--version` |       | Show version                               |
+| `--help`    | `-h`  | Show help                                  |
 
 ## Examples
 
@@ -1109,8 +1108,8 @@ GET https://api.example.com/health
 Authorization: Bearer {{$processEnv API_KEY}}
 EOF
 
-# Run with no color for CI logs
-restclient send test.http --no-color --body
+# Run with colors disabled via config for CI logs
+restclient send test.http --body
 
 # Check response
 if [ $? -eq 0 ]; then
