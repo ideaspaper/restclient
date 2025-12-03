@@ -8,7 +8,7 @@
 ###############################################################################
 
 ### Get all posts
-# @name getPost
+# @name getAllPosts
 GET {{baseUrl}}/posts
 Accept: application/json
 
