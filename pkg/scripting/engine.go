@@ -8,13 +8,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/dop251/goja"
 	"github.com/google/uuid"
+	"github.com/ideaspaper/restclient/pkg/errors"
 )
 
 // Engine executes JavaScript scripts for HTTP request/response handling
@@ -35,7 +35,7 @@ type ScriptResult struct {
 	Tests      []TestResult
 	Logs       []string
 	Error      error
-	GlobalVars map[string]interface{}
+	GlobalVars map[string]any
 }
 
 // NewEngine creates a new scripting engine
@@ -60,7 +60,7 @@ func (e *Engine) ExecuteWithContext(ctx context.Context, script string, scriptCt
 	// Check for context cancellation before starting
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("script execution canceled: %w", ctx.Err())
+		return nil, errors.Wrapf(ctx.Err(), "script execution canceled")
 	default:
 	}
 
@@ -68,7 +68,7 @@ func (e *Engine) ExecuteWithContext(ctx context.Context, script string, scriptCt
 	result := &ScriptResult{
 		Tests:      []TestResult{},
 		Logs:       []string{},
-		GlobalVars: make(map[string]interface{}),
+		GlobalVars: make(map[string]any),
 	}
 
 	// Set up the runtime
@@ -83,7 +83,7 @@ func (e *Engine) ExecuteWithContext(ctx context.Context, script string, scriptCt
 
 	// Register global objects
 	if err := e.registerGlobals(scriptCtx, result); err != nil {
-		return nil, fmt.Errorf("failed to register globals: %w", err)
+		return nil, errors.Wrap(err, "failed to register globals")
 	}
 
 	// Execute the script
@@ -92,14 +92,14 @@ func (e *Engine) ExecuteWithContext(ctx context.Context, script string, scriptCt
 		// Check if this was due to context cancellation
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("script execution canceled: %w", ctx.Err())
+			return nil, errors.Wrapf(ctx.Err(), "script execution canceled")
 		default:
 		}
 
 		if exception, ok := err.(*goja.Exception); ok {
-			result.Error = fmt.Errorf("script error: %s", exception.String())
+			result.Error = errors.NewScriptError("", exception.String())
 		} else {
-			result.Error = fmt.Errorf("script error: %w", err)
+			result.Error = errors.NewScriptErrorWithCause("", "execution failed", err)
 		}
 	}
 
@@ -123,7 +123,7 @@ func (e *Engine) registerGlobals(ctx *ScriptContext, result *ScriptResult) error
 	e.vm.Set("request", request)
 
 	// Add console.log support
-	console := map[string]interface{}{
+	console := map[string]any{
 		"log": func(call goja.FunctionCall) goja.Value {
 			args := make([]string, len(call.Arguments))
 			for i, arg := range call.Arguments {
@@ -143,13 +143,13 @@ func (e *Engine) registerGlobals(ctx *ScriptContext, result *ScriptResult) error
 }
 
 // createClientObject creates the client JavaScript object
-func (e *Engine) createClientObject(ctx *ScriptContext, result *ScriptResult) map[string]interface{} {
+func (e *Engine) createClientObject(ctx *ScriptContext, result *ScriptResult) map[string]any {
 	global := &GlobalStorage{
 		vars:    ctx.GlobalVars,
 		headers: make(map[string]string),
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		// client.test(name, func)
 		"test": func(call goja.FunctionCall) goja.Value {
 			if len(call.Arguments) < 2 {
@@ -213,7 +213,7 @@ func (e *Engine) createClientObject(ctx *ScriptContext, result *ScriptResult) ma
 		},
 
 		// client.global
-		"global": map[string]interface{}{
+		"global": map[string]any{
 			// client.global.set(name, value)
 			"set": func(call goja.FunctionCall) goja.Value {
 				if len(call.Arguments) < 2 {
@@ -258,7 +258,7 @@ func (e *Engine) createClientObject(ctx *ScriptContext, result *ScriptResult) ma
 			// client.global.clearAll()
 			"clearAll": func(call goja.FunctionCall) goja.Value {
 				global.ClearAll()
-				result.GlobalVars = make(map[string]interface{})
+				result.GlobalVars = make(map[string]any)
 				return goja.Undefined()
 			},
 		},
@@ -266,26 +266,26 @@ func (e *Engine) createClientObject(ctx *ScriptContext, result *ScriptResult) ma
 }
 
 // createResponseObject creates the response JavaScript object
-func (e *Engine) createResponseObject(ctx *ScriptContext) map[string]interface{} {
+func (e *Engine) createResponseObject(ctx *ScriptContext) map[string]any {
 	resp := ctx.Response
 
 	// Parse body as JSON if possible
-	var bodyObj interface{}
+	var bodyObj any
 	if err := json.Unmarshal([]byte(resp.Body), &bodyObj); err != nil {
 		bodyObj = resp.Body // Use string if not valid JSON
 	}
 
 	contentType := resp.ContentType()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"status":     resp.StatusCode,
 		"statusText": resp.StatusMessage,
 		"body":       bodyObj,
-		"contentType": map[string]interface{}{
+		"contentType": map[string]any{
 			"mimeType": getMimeType(contentType),
 			"charset":  getCharset(contentType),
 		},
-		"headers": map[string]interface{}{
+		"headers": map[string]any{
 			// response.headers.valueOf(name)
 			"valueOf": func(call goja.FunctionCall) goja.Value {
 				if len(call.Arguments) < 1 {
@@ -316,23 +316,23 @@ func (e *Engine) createResponseObject(ctx *ScriptContext) map[string]interface{}
 }
 
 // createRequestObject creates the request JavaScript object
-func (e *Engine) createRequestObject(ctx *ScriptContext) map[string]interface{} {
+func (e *Engine) createRequestObject(ctx *ScriptContext) map[string]any {
 	req := ctx.Request
 
 	// Build headers array
-	var headersArray []map[string]interface{}
+	var headersArray []map[string]any
 	for name, value := range req.Headers {
-		headersArray = append(headersArray, map[string]interface{}{
+		headersArray = append(headersArray, map[string]any{
 			"name":  name,
 			"value": value,
 		})
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"method": req.Method,
 		"url":    req.URL,
 		"body":   req.RawBody,
-		"headers": map[string]interface{}{
+		"headers": map[string]any{
 			"all": headersArray,
 			// request.headers.findByName(name)
 			"findByName": func(call goja.FunctionCall) goja.Value {
@@ -348,7 +348,7 @@ func (e *Engine) createRequestObject(ctx *ScriptContext) map[string]interface{} 
 				return goja.Null()
 			},
 		},
-		"environment": map[string]interface{}{
+		"environment": map[string]any{
 			// request.environment.get(name)
 			"get": func(call goja.FunctionCall) goja.Value {
 				if len(call.Arguments) < 1 {
@@ -367,20 +367,20 @@ func (e *Engine) createRequestObject(ctx *ScriptContext) map[string]interface{} 
 
 // GlobalStorage manages global variables across requests
 type GlobalStorage struct {
-	vars    map[string]interface{}
+	vars    map[string]any
 	headers map[string]string
 }
 
 // Set stores a variable
-func (g *GlobalStorage) Set(name string, value interface{}) {
+func (g *GlobalStorage) Set(name string, value any) {
 	if g.vars == nil {
-		g.vars = make(map[string]interface{})
+		g.vars = make(map[string]any)
 	}
 	g.vars[name] = value
 }
 
 // Get retrieves a variable
-func (g *GlobalStorage) Get(name string) interface{} {
+func (g *GlobalStorage) Get(name string) any {
 	if g.vars == nil {
 		return nil
 	}
@@ -401,7 +401,7 @@ func (g *GlobalStorage) Clear(name string) {
 
 // ClearAll removes all variables
 func (g *GlobalStorage) ClearAll() {
-	g.vars = make(map[string]interface{})
+	g.vars = make(map[string]any)
 }
 
 // Helper functions

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/sahilm/fuzzy"
 )
 
@@ -210,10 +211,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "end", "ctrl+e":
-			m.cursor = len(m.filtered) - 1
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
+			m.cursor = max(len(m.filtered)-1, 0)
 			if m.cursor >= m.maxVisible {
 				m.scrollOffset = m.cursor - m.maxVisible + 1
 			}
@@ -311,10 +309,7 @@ func (m Model) View() string {
 	} else {
 		// Calculate visible range
 		start := m.scrollOffset
-		end := start + m.maxVisible
-		if end > len(m.filtered) {
-			end = len(m.filtered)
-		}
+		end := min(start+m.maxVisible, len(m.filtered))
 
 		// Show scroll indicator if needed
 		if start > 0 {
@@ -449,7 +444,7 @@ func (m Model) Cancelled() bool {
 }
 
 // ErrCancelled is returned when the user cancels the selection
-var ErrCancelled = fmt.Errorf("selection cancelled")
+var ErrCancelled = errors.ErrCanceled
 
 // Run runs the selector and returns the selected item and its original index
 // Returns nil, -1, ErrCancelled if user cancelled, or nil, -1, error for other errors
@@ -460,7 +455,7 @@ func Run(items []Item, useColors bool) (Item, int, error) {
 
 	finalModel, err := p.Run()
 	if err != nil {
-		return nil, -1, fmt.Errorf("failed to run selector: %w", err)
+		return nil, -1, errors.Wrap(err, "failed to run selector")
 	}
 
 	m := finalModel.(Model)

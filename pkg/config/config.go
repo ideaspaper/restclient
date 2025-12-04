@@ -2,7 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -12,8 +11,10 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
+	"github.com/ideaspaper/restclient/internal/constants"
 	"github.com/ideaspaper/restclient/internal/paths"
 	"github.com/ideaspaper/restclient/pkg/client"
+	"github.com/ideaspaper/restclient/pkg/errors"
 )
 
 const (
@@ -72,7 +73,7 @@ func DefaultConfig() *Config {
 		TimeoutMs:       0,
 		RememberCookies: true,
 		DefaultHeaders: map[string]string{
-			"User-Agent": "restclient-cli",
+			constants.HeaderUserAgent: constants.DefaultUserAgent,
 		},
 		EnvironmentVariables: map[string]map[string]string{
 			"$shared": {},
@@ -112,7 +113,7 @@ func setDefaults(v *viper.Viper) {
 func LoadConfig() (*Config, error) {
 	configDir, err := paths.AppDataDir("")
 	if err != nil {
-		return nil, fmt.Errorf("failed to get config directory: %w", err)
+		return nil, errors.Wrap(err, "failed to get config directory")
 	}
 
 	return LoadConfigFromDir(configDir)
@@ -146,13 +147,13 @@ func LoadConfigFromDir(dir string) (*Config, error) {
 			cfg.configPath = configPath
 			return cfg, nil
 		}
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, errors.Wrap(err, "failed to read config file")
 	}
 
 	// Unmarshal into Config struct
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
+		return nil, errors.Wrap(err, "failed to parse config file")
 	}
 
 	cfg.v = v
@@ -193,12 +194,12 @@ func LoadConfigFromFile(filePath string) (*Config, error) {
 			cfg.configPath = filePath
 			return cfg, nil
 		}
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, errors.Wrap(err, "failed to read config file")
 	}
 
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
+		return nil, errors.Wrap(err, "failed to parse config file")
 	}
 
 	cfg.v = v
@@ -223,7 +224,7 @@ func (c *Config) Save() error {
 	if c.configPath == "" {
 		configDir, err := paths.AppDataDir("")
 		if err != nil {
-			return fmt.Errorf("failed to get config directory: %w", err)
+			return errors.Wrap(err, "failed to get config directory")
 		}
 		c.configPath = filepath.Join(configDir, configFileName+"."+configFileType)
 	}
@@ -231,7 +232,7 @@ func (c *Config) Save() error {
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(c.configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create config directory: %w", err)
+		return errors.Wrap(err, "failed to create config directory")
 	}
 
 	// Update viper with current config values
@@ -279,7 +280,7 @@ func (c *Config) GetEnvironment() map[string]string {
 func (c *Config) SetEnvironment(name string) error {
 	if name != "" {
 		if _, ok := c.EnvironmentVariables[name]; !ok && name != "$shared" {
-			return fmt.Errorf("environment '%s' not found", name)
+			return errors.NewValidationErrorWithValue("environment", name, "not found")
 		}
 	}
 	c.CurrentEnvironment = name
@@ -300,7 +301,7 @@ func (c *Config) ListEnvironments() []string {
 // AddEnvironment adds a new environment
 func (c *Config) AddEnvironment(name string, vars map[string]string) error {
 	if name == "$shared" {
-		return fmt.Errorf("cannot use reserved name '$shared'")
+		return errors.NewValidationErrorWithValue("environment", "$shared", "cannot use reserved name")
 	}
 	if vars == nil {
 		vars = make(map[string]string)
@@ -312,10 +313,10 @@ func (c *Config) AddEnvironment(name string, vars map[string]string) error {
 // RemoveEnvironment removes an environment
 func (c *Config) RemoveEnvironment(name string) error {
 	if name == "$shared" {
-		return fmt.Errorf("cannot remove shared environment")
+		return errors.NewValidationErrorWithValue("environment", "$shared", "cannot remove shared environment")
 	}
 	if _, ok := c.EnvironmentVariables[name]; !ok {
-		return fmt.Errorf("environment '%s' not found", name)
+		return errors.NewValidationErrorWithValue("environment", name, "not found")
 	}
 	delete(c.EnvironmentVariables, name)
 	if c.CurrentEnvironment == name {
@@ -327,7 +328,7 @@ func (c *Config) RemoveEnvironment(name string) error {
 // SetEnvironmentVariable sets a variable in an environment
 func (c *Config) SetEnvironmentVariable(env, name, value string) error {
 	if _, ok := c.EnvironmentVariables[env]; !ok {
-		return fmt.Errorf("environment '%s' not found", env)
+		return errors.NewValidationErrorWithValue("environment", env, "not found")
 	}
 	c.EnvironmentVariables[env][name] = value
 	return nil
@@ -397,23 +398,23 @@ func (c *Config) ExportToJSON() (string, error) {
 		settings := c.v.AllSettings()
 		jsonBytes, err := json.MarshalIndent(settings, "", "  ")
 		if err != nil {
-			return "", fmt.Errorf("failed to marshal config to JSON: %w", err)
+			return "", errors.Wrap(err, "failed to marshal config to JSON")
 		}
 		return string(jsonBytes), nil
 	}
 
 	// Fallback to manual JSON marshaling
-	return "", fmt.Errorf("viper not initialized")
+	return "", errors.NewValidationError("config", "viper not initialized")
 }
 
 // Reload reloads the configuration from the config file
 func (c *Config) Reload() error {
 	if c.v == nil {
-		return fmt.Errorf("viper not initialized")
+		return errors.NewValidationError("config", "viper not initialized")
 	}
 
 	if err := c.v.ReadInConfig(); err != nil {
-		return fmt.Errorf("failed to reload config: %w", err)
+		return errors.Wrap(err, "failed to reload config")
 	}
 
 	return c.v.Unmarshal(c)

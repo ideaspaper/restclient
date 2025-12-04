@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ideaspaper/restclient/pkg/auth"
 	"github.com/ideaspaper/restclient/pkg/models"
 )
 
@@ -304,28 +305,12 @@ func TestClearCookies(t *testing.T) {
 	}
 }
 
-func TestMd5Hash(t *testing.T) {
-	result := md5Hash("test")
-	expected := "098f6bcd4621d373cade4e832627b4f6"
-	if result != expected {
-		t.Errorf("md5Hash() = %v, want %v", result, expected)
-	}
-}
-
-func TestSha256Hash(t *testing.T) {
-	result := sha256Hash("test")
-	expected := "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-	if result != expected {
-		t.Errorf("sha256Hash() = %v, want %v", result, expected)
-	}
-}
-
 func TestUpdateAuthHeader(t *testing.T) {
 	req := models.NewHttpRequest("GET", "http://test.com", map[string]string{
 		"Authorization": "old-value",
 	}, nil, "", "")
 
-	updateAuthHeader(req, "new-value")
+	auth.UpdateAuthHeader(req, "new-value")
 
 	if req.Headers["Authorization"] != "new-value" {
 		t.Errorf("Authorization = %v, want new-value", req.Headers["Authorization"])
@@ -337,7 +322,7 @@ func TestDeleteAuthHeader(t *testing.T) {
 		"Authorization": "some-value",
 	}, nil, "", "")
 
-	deleteAuthHeader(req)
+	auth.DeleteAuthHeader(req)
 
 	if _, exists := req.Headers["Authorization"]; exists {
 		t.Error("Authorization header should be deleted")
@@ -347,28 +332,28 @@ func TestDeleteAuthHeader(t *testing.T) {
 func TestParseDigestChallenge(t *testing.T) {
 	header := `Digest realm="test@realm", nonce="abc123", qop="auth", algorithm=MD5, opaque="xyz789"`
 
-	challenge := parseDigestChallenge(header)
+	challenge := auth.ParseDigestChallenge(header)
 
-	if challenge.realm != "test@realm" {
-		t.Errorf("realm = %v, want test@realm", challenge.realm)
+	if challenge.Realm != "test@realm" {
+		t.Errorf("realm = %v, want test@realm", challenge.Realm)
 	}
-	if challenge.nonce != "abc123" {
-		t.Errorf("nonce = %v, want abc123", challenge.nonce)
+	if challenge.Nonce != "abc123" {
+		t.Errorf("nonce = %v, want abc123", challenge.Nonce)
 	}
-	if challenge.qop != "auth" {
-		t.Errorf("qop = %v, want auth", challenge.qop)
+	if challenge.QOP != "auth" {
+		t.Errorf("qop = %v, want auth", challenge.QOP)
 	}
-	if challenge.algorithm != "MD5" {
-		t.Errorf("algorithm = %v, want MD5", challenge.algorithm)
+	if challenge.Algorithm != "MD5" {
+		t.Errorf("algorithm = %v, want MD5", challenge.Algorithm)
 	}
-	if challenge.opaque != "xyz789" {
-		t.Errorf("opaque = %v, want xyz789", challenge.opaque)
+	if challenge.Opaque != "xyz789" {
+		t.Errorf("opaque = %v, want xyz789", challenge.Opaque)
 	}
 }
 
 func TestGenerateNonce(t *testing.T) {
-	nonce1 := generateNonce()
-	nonce2 := generateNonce()
+	nonce1 := auth.GenerateNonce()
+	nonce2 := auth.GenerateNonce()
 
 	if len(nonce1) != 32 { // 16 bytes = 32 hex chars
 		t.Errorf("nonce length = %v, want 32", len(nonce1))
@@ -376,14 +361,6 @@ func TestGenerateNonce(t *testing.T) {
 
 	if nonce1 == nonce2 {
 		t.Error("nonces should be different")
-	}
-}
-
-func TestGetSignatureKey(t *testing.T) {
-	key := getSignatureKey("secret", "20230101", "us-east-1", "s3")
-
-	if len(key) != 32 { // SHA256 produces 32 bytes
-		t.Errorf("key length = %v, want 32", len(key))
 	}
 }
 
@@ -454,14 +431,14 @@ func TestMultipleHTTPMethods(t *testing.T) {
 }
 
 func TestBuildDigestResponse(t *testing.T) {
-	challenge := digestChallenge{
-		realm:     "test-realm",
-		nonce:     "abc123",
-		qop:       "auth",
-		algorithm: "MD5",
+	challenge := auth.DigestChallenge{
+		Realm:     "test-realm",
+		Nonce:     "abc123",
+		QOP:       "auth",
+		Algorithm: "MD5",
 	}
 
-	response := buildDigestResponse("user", "pass", "GET", "/resource", challenge)
+	response := auth.BuildDigestAuth("user", "pass", "GET", "/resource", challenge)
 
 	if !strings.Contains(response, `username="user"`) {
 		t.Error("Response should contain username")
@@ -898,14 +875,14 @@ func TestNoCookieJar(t *testing.T) {
 
 // TestBuildDigestResponseWithoutQop tests digest without qop (older servers)
 func TestBuildDigestResponseWithoutQop(t *testing.T) {
-	challenge := digestChallenge{
-		realm:     "test-realm",
-		nonce:     "abc123",
-		qop:       "", // No qop
-		algorithm: "MD5",
+	challenge := auth.DigestChallenge{
+		Realm:     "test-realm",
+		Nonce:     "abc123",
+		QOP:       "", // No qop
+		Algorithm: "MD5",
 	}
 
-	response := buildDigestResponse("user", "pass", "GET", "/resource", challenge)
+	response := auth.BuildDigestAuth("user", "pass", "GET", "/resource", challenge)
 
 	// Without qop, response should not contain nc or cnonce
 	if strings.Contains(response, "nc=") {
@@ -921,15 +898,15 @@ func TestBuildDigestResponseWithoutQop(t *testing.T) {
 
 // TestBuildDigestResponseMD5Sess tests MD5-sess algorithm variant
 func TestBuildDigestResponseMD5Sess(t *testing.T) {
-	challenge := digestChallenge{
-		realm:     "test-realm",
-		nonce:     "abc123",
-		qop:       "auth",
-		algorithm: "MD5-sess",
-		opaque:    "opaque-value",
+	challenge := auth.DigestChallenge{
+		Realm:     "test-realm",
+		Nonce:     "abc123",
+		QOP:       "auth",
+		Algorithm: "MD5-sess",
+		Opaque:    "opaque-value",
 	}
 
-	response := buildDigestResponse("user", "pass", "GET", "/resource", challenge)
+	response := auth.BuildDigestAuth("user", "pass", "GET", "/resource", challenge)
 
 	if !strings.Contains(response, `algorithm=MD5-sess`) {
 		t.Error("Response should contain algorithm=MD5-sess")

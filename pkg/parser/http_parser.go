@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ideaspaper/restclient/internal/constants"
+	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/models"
 )
 
@@ -47,7 +49,7 @@ type HttpRequestParser struct {
 func NewHttpRequestParser(content string, defaultHeaders map[string]string, baseDir string) *HttpRequestParser {
 	if defaultHeaders == nil {
 		defaultHeaders = map[string]string{
-			"User-Agent": "restclient-cli",
+			constants.HeaderUserAgent: constants.DefaultUserAgent,
 		}
 	}
 	return &HttpRequestParser{
@@ -368,7 +370,7 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	}
 
 	if !foundRequestLine {
-		return nil, fmt.Errorf("no request line found")
+		return nil, errors.NewParseError("", 0, "no request line found")
 	}
 
 	// Set scripts in metadata
@@ -398,8 +400,8 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	// Auto-detect GraphQL by URL path or content-type
 	if !isGraphQL {
 		if strings.HasSuffix(url, "/graphql") || strings.Contains(url, "/graphql?") {
-			contentType, _ := getHeaderCaseInsensitive(headers, "Content-Type")
-			if contentType == "" || strings.Contains(contentType, "application/json") {
+			contentType, _ := getHeaderCaseInsensitive(headers, constants.HeaderContentType)
+			if contentType == "" || strings.Contains(contentType, constants.MIMEApplicationJSON) {
 				isGraphQL = true
 			}
 		}
@@ -412,7 +414,7 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	}
 
 	// Handle Host header for relative URLs
-	if hostHeader, ok := getHeaderCaseInsensitive(headers, "Host"); ok && strings.HasPrefix(url, "/") {
+	if hostHeader, ok := getHeaderCaseInsensitive(headers, constants.HeaderHost); ok && strings.HasPrefix(url, "/") {
 		scheme := "http"
 		if strings.Contains(hostHeader, ":443") || strings.Contains(hostHeader, ":8443") {
 			scheme = "https"
@@ -424,7 +426,7 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	req.Metadata = metadata
 
 	// Parse multipart parts if applicable
-	contentType, _ := getHeaderCaseInsensitive(headers, "Content-Type")
+	contentType, _ := getHeaderCaseInsensitive(headers, constants.HeaderContentType)
 	if isMultiPartFormData(contentType) {
 		req.MultipartParts = p.parseMultipartParts(rawBody, contentType)
 	}
@@ -534,7 +536,7 @@ func parseHeaders(lines []string, defaultHeaders map[string]string, url string) 
 
 	// Copy default headers (except Host for non-relative URLs)
 	for k, v := range defaultHeaders {
-		if strings.EqualFold(k, "host") && !strings.HasPrefix(url, "/") {
+		if strings.EqualFold(k, constants.HeaderHost) && !strings.HasPrefix(url, "/") {
 			continue
 		}
 		headers[k] = v
@@ -557,7 +559,7 @@ func parseHeaders(lines []string, defaultHeaders map[string]string, url string) 
 		if existingName, ok := headerNames[lowerName]; ok {
 			// Combine values
 			splitter := ","
-			if lowerName == "cookie" {
+			if strings.EqualFold(lowerName, constants.HeaderCookie) {
 				splitter = ";"
 			}
 			headers[existingName] = headers[existingName] + splitter + value
@@ -597,7 +599,7 @@ func (p *HttpRequestParser) parseBody(lines []string, headers map[string]string,
 		return nil, "", nil
 	}
 
-	contentType, _ := getHeaderCaseInsensitive(headers, "Content-Type")
+	contentType, _ := getHeaderCaseInsensitive(headers, constants.HeaderContentType)
 
 	// Check for file reference
 	inputFileRegex := regexp.MustCompile(`^<(?:@(?:(\w+))?)?[ \t]+(.+?)\s*$`)
@@ -783,7 +785,8 @@ func (p *HttpRequestParser) readFileContent(filePath, encoding string) (string, 
 }
 
 // readFile reads a file and returns its content
-func readFile(path, encoding string) (string, error) {
+// encoding parameter is reserved for future use (e.g., handling different character encodings)
+func readFile(path, _ string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -849,7 +852,7 @@ func createGraphQLBody(body string) string {
 func ParseFile(filePath string, defaultHeaders map[string]string) ([]*models.HttpRequest, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return nil, errors.NewParseErrorWithCause(filePath, 0, "failed to read file", err)
 	}
 
 	baseDir := filepath.Dir(filePath)
@@ -861,7 +864,7 @@ func ParseFile(filePath string, defaultHeaders map[string]string) ([]*models.Htt
 func ParseFileWithWarnings(filePath string, defaultHeaders map[string]string) (*ParseResult, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return nil, errors.NewParseErrorWithCause(filePath, 0, "failed to read file", err)
 	}
 
 	baseDir := filepath.Dir(filePath)
@@ -877,7 +880,8 @@ func ParseFileAt(filePath string, index int, defaultHeaders map[string]string) (
 	}
 
 	if index < 0 || index >= len(requests) {
-		return nil, fmt.Errorf("request index %d out of range (0-%d)", index, len(requests)-1)
+		return nil, errors.NewValidationErrorWithValue("request index", fmt.Sprintf("%d", index),
+			fmt.Sprintf("out of range (0-%d)", len(requests)-1))
 	}
 
 	return requests[index], nil
@@ -896,5 +900,5 @@ func ParseFileByName(filePath string, name string, defaultHeaders map[string]str
 		}
 	}
 
-	return nil, fmt.Errorf("request with name '%s' not found", name)
+	return nil, errors.NewValidationErrorWithValue("request name", name, "not found")
 }

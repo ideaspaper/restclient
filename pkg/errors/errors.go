@@ -181,7 +181,7 @@ func Wrap(err error, message string) error {
 
 // Wrapf wraps an error with a formatted message.
 // Returns nil if err is nil.
-func Wrapf(err error, format string, args ...interface{}) error {
+func Wrapf(err error, format string, args ...any) error {
 	if err == nil {
 		return nil
 	}
@@ -196,6 +196,6 @@ func Is(err, target error) bool {
 
 // As finds the first error in err's chain that matches target.
 // This is a convenience re-export of errors.As.
-func As(err error, target interface{}) bool {
+func As(err error, target any) bool {
 	return errors.As(err, target)
 }

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/ideaspaper/restclient/pkg/errors"
 )
 
 // ImportOptions configures how collections are imported
@@ -76,12 +78,12 @@ type ImportResult struct {
 func Import(collectionPath string, opts ImportOptions) (*ImportResult, error) {
 	data, err := os.ReadFile(collectionPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read collection file: %w", err)
+		return nil, errors.Wrap(err, "failed to read collection file")
 	}
 
 	var collection Collection
 	if err := json.Unmarshal(data, &collection); err != nil {
-		return nil, fmt.Errorf("failed to parse collection JSON: %w", err)
+		return nil, errors.Wrap(err, "failed to parse collection JSON")
 	}
 
 	return ImportCollection(&collection, opts)
@@ -93,7 +95,7 @@ func ImportCollection(collection *Collection, opts ImportOptions) (*ImportResult
 
 	// Validate schema version
 	if collection.Info.Schema != SchemaV21 {
-		return nil, fmt.Errorf("unsupported Postman collection schema: %s (expected %s)", collection.Info.Schema, SchemaV21)
+		return nil, errors.NewValidationErrorWithValue("Postman collection schema", collection.Info.Schema, fmt.Sprintf("unsupported (expected %s)", SchemaV21))
 	}
 
 	if opts.SingleFile {
@@ -107,14 +109,14 @@ func ImportCollection(collection *Collection, opts ImportOptions) (*ImportResult
 		// Create parent directory if needed
 		parentDir := filepath.Dir(filePath)
 		if err := os.MkdirAll(parentDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create output directory: %w", err)
+			return nil, errors.Wrap(err, "failed to create output directory")
 		}
 
 		// Create a single .http file with all requests
 		content := generateHttpFile(collection, opts)
 
 		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-			return nil, fmt.Errorf("failed to write file %s: %w", filePath, err)
+			return nil, errors.Wrapf(err, "failed to write file %s", filePath)
 		}
 
 		result.FilesCreated = append(result.FilesCreated, filePath)
@@ -125,7 +127,7 @@ func ImportCollection(collection *Collection, opts ImportOptions) (*ImportResult
 		// Create output directory with collection name as root folder
 		collectionDir := filepath.Join(opts.OutputDir, sanitizeFileName(collection.Info.Name))
 		if err := os.MkdirAll(collectionDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create output directory: %w", err)
+			return nil, errors.Wrap(err, "failed to create output directory")
 		}
 		// Create separate files for each folder
 		if err := processItems(collection, collection.Item, collectionDir, collectionDir, opts, result); err != nil {
@@ -194,7 +196,7 @@ func processItems(collection *Collection, items []Item, currentDir string, rootD
 
 		filePath := filepath.Join(currentDir, fileName)
 		if err := os.WriteFile(filePath, []byte(content.String()), 0644); err != nil {
-			return fmt.Errorf("failed to write file %s: %w", filePath, err)
+			return errors.Wrapf(err, "failed to write file %s", filePath)
 		}
 
 		result.FilesCreated = append(result.FilesCreated, filePath)
@@ -542,11 +544,11 @@ func writeBody(content *strings.Builder, body *Body) {
 	case "graphql":
 		if body.GraphQL != nil {
 			// GraphQL requests are wrapped in JSON
-			gql := map[string]interface{}{
+			gql := map[string]any{
 				"query": body.GraphQL.Query,
 			}
 			if body.GraphQL.Variables != "" {
-				var vars interface{}
+				var vars any
 				if err := json.Unmarshal([]byte(body.GraphQL.Variables), &vars); err == nil {
 					gql["variables"] = vars
 				} else {

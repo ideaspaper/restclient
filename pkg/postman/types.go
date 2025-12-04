@@ -9,12 +9,12 @@ import (
 
 // Collection represents a Postman Collection v2.1.0
 type Collection struct {
-	Info                    Info        `json:"info"`
-	Item                    []Item      `json:"item"`
-	Event                   []Event     `json:"event,omitempty"`
-	Variable                []Variable  `json:"variable,omitempty"`
-	Auth                    *Auth       `json:"auth,omitempty"`
-	ProtocolProfileBehavior interface{} `json:"protocolProfileBehavior,omitempty"`
+	Info                    Info       `json:"info"`
+	Item                    []Item     `json:"item"`
+	Event                   []Event    `json:"event,omitempty"`
+	Variable                []Variable `json:"variable,omitempty"`
+	Auth                    *Auth      `json:"auth,omitempty"`
+	ProtocolProfileBehavior any        `json:"protocolProfileBehavior,omitempty"`
 }
 
 // Info contains metadata about the collection
@@ -22,7 +22,7 @@ type Info struct {
 	Name        string       `json:"name"`
 	PostmanID   string       `json:"_postman_id,omitempty"`
 	Description *Description `json:"description,omitempty"`
-	Version     interface{}  `json:"version,omitempty"`
+	Version     any          `json:"version,omitempty"`
 	Schema      string       `json:"schema"`
 }
 
@@ -38,11 +38,11 @@ type Item struct {
 	Item []Item `json:"item,omitempty"`
 
 	// Request item specific
-	ID                      string      `json:"id,omitempty"`
-	Request                 *Request    `json:"request,omitempty"`
-	Response                []Response  `json:"response,omitempty"`
-	ProtocolProfileBehavior interface{} `json:"protocolProfileBehavior,omitempty"`
-	Auth                    *Auth       `json:"auth,omitempty"`
+	ID                      string     `json:"id,omitempty"`
+	Request                 *Request   `json:"request,omitempty"`
+	Response                []Response `json:"response,omitempty"`
+	ProtocolProfileBehavior any        `json:"protocolProfileBehavior,omitempty"`
+	Auth                    *Auth      `json:"auth,omitempty"`
 }
 
 // IsFolder returns true if this item is a folder (contains sub-items)
@@ -67,14 +67,14 @@ type RequestString string
 
 // URL represents a request URL
 type URL struct {
-	Raw      string      `json:"raw,omitempty"`
-	Protocol string      `json:"protocol,omitempty"`
-	Host     interface{} `json:"host,omitempty"` // Can be string or []string
-	Path     interface{} `json:"path,omitempty"` // Can be string or []interface{}
-	Port     string      `json:"port,omitempty"`
-	Query    []Query     `json:"query,omitempty"`
-	Hash     string      `json:"hash,omitempty"`
-	Variable []Variable  `json:"variable,omitempty"`
+	Raw      string     `json:"raw,omitempty"`
+	Protocol string     `json:"protocol,omitempty"`
+	Host     any        `json:"host,omitempty"` // Can be string or []string
+	Path     any        `json:"path,omitempty"` // Can be string or []any
+	Port     string     `json:"port,omitempty"`
+	Query    []Query    `json:"query,omitempty"`
+	Hash     string     `json:"hash,omitempty"`
+	Variable []Variable `json:"variable,omitempty"`
 }
 
 // UnmarshalJSON handles both string and object URL formats
@@ -112,7 +112,7 @@ func (u *URL) GetHost() string {
 	switch h := u.Host.(type) {
 	case string:
 		return h
-	case []interface{}:
+	case []any:
 		parts := make([]string, 0, len(h))
 		for _, p := range h {
 			if s, ok := p.(string); ok {
@@ -141,13 +141,13 @@ func (u *URL) GetPath() string {
 	switch p := u.Path.(type) {
 	case string:
 		return p
-	case []interface{}:
+	case []any:
 		parts := make([]string, 0, len(p))
 		for _, segment := range p {
 			switch s := segment.(type) {
 			case string:
 				parts = append(parts, s)
-			case map[string]interface{}:
+			case map[string]any:
 				// Path variable object with type and value
 				if val, ok := s["value"].(string); ok {
 					parts = append(parts, val)
@@ -234,7 +234,7 @@ type URLEncodedPair struct {
 type FormDataPair struct {
 	Key         string       `json:"key"`
 	Value       string       `json:"value,omitempty"`
-	Src         interface{}  `json:"src,omitempty"` // Can be string, []string, or null
+	Src         any          `json:"src,omitempty"` // Can be string, []string, or null
 	Disabled    bool         `json:"disabled,omitempty"`
 	Type        string       `json:"type,omitempty"` // "text" or "file"
 	ContentType string       `json:"contentType,omitempty"`
@@ -243,8 +243,8 @@ type FormDataPair struct {
 
 // File represents a file to upload
 type File struct {
-	Src     interface{} `json:"src,omitempty"` // Can be string or null
-	Content string      `json:"content,omitempty"`
+	Src     any    `json:"src,omitempty"` // Can be string or null
+	Content string `json:"content,omitempty"`
 }
 
 // BodyOptions contains additional body configuration
@@ -259,31 +259,31 @@ type RawOptions struct {
 
 // Response represents a saved response
 type Response struct {
-	ID              string      `json:"id,omitempty"`
-	Name            string      `json:"name,omitempty"`
-	OriginalRequest *Request    `json:"originalRequest,omitempty"`
-	ResponseTime    interface{} `json:"responseTime,omitempty"` // Can be null, string, or number
-	Timings         interface{} `json:"timings,omitempty"`
-	Header          interface{} `json:"header,omitempty"` // Can be []Header, string, or null
-	Cookie          []Cookie    `json:"cookie,omitempty"`
-	Body            string      `json:"body,omitempty"`
-	Status          string      `json:"status,omitempty"`
-	Code            int         `json:"code,omitempty"`
+	ID              string   `json:"id,omitempty"`
+	Name            string   `json:"name,omitempty"`
+	OriginalRequest *Request `json:"originalRequest,omitempty"`
+	ResponseTime    any      `json:"responseTime,omitempty"` // Can be null, string, or number
+	Timings         any      `json:"timings,omitempty"`
+	Header          any      `json:"header,omitempty"` // Can be []Header, string, or null
+	Cookie          []Cookie `json:"cookie,omitempty"`
+	Body            string   `json:"body,omitempty"`
+	Status          string   `json:"status,omitempty"`
+	Code            int      `json:"code,omitempty"`
 }
 
 // Cookie represents an HTTP cookie
 type Cookie struct {
-	Domain     string        `json:"domain"`
-	Expires    string        `json:"expires,omitempty"`
-	MaxAge     string        `json:"maxAge,omitempty"`
-	HostOnly   bool          `json:"hostOnly,omitempty"`
-	HTTPOnly   bool          `json:"httpOnly,omitempty"`
-	Name       string        `json:"name,omitempty"`
-	Path       string        `json:"path"`
-	Secure     bool          `json:"secure,omitempty"`
-	Session    bool          `json:"session,omitempty"`
-	Value      string        `json:"value,omitempty"`
-	Extensions []interface{} `json:"extensions,omitempty"`
+	Domain     string `json:"domain"`
+	Expires    string `json:"expires,omitempty"`
+	MaxAge     string `json:"maxAge,omitempty"`
+	HostOnly   bool   `json:"hostOnly,omitempty"`
+	HTTPOnly   bool   `json:"httpOnly,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Path       string `json:"path"`
+	Secure     bool   `json:"secure,omitempty"`
+	Session    bool   `json:"session,omitempty"`
+	Value      string `json:"value,omitempty"`
+	Extensions []any  `json:"extensions,omitempty"`
 }
 
 // Event represents a script event (prerequest or test)
@@ -296,11 +296,11 @@ type Event struct {
 
 // Script represents a JavaScript script
 type Script struct {
-	ID   string      `json:"id,omitempty"`
-	Type string      `json:"type,omitempty"`
-	Exec interface{} `json:"exec,omitempty"` // Can be []string or string
-	Src  *URL        `json:"src,omitempty"`
-	Name string      `json:"name,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Type string `json:"type,omitempty"`
+	Exec any    `json:"exec,omitempty"` // Can be []string or string
+	Src  *URL   `json:"src,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 // GetExec returns the script content as a single string
@@ -311,7 +311,7 @@ func (s *Script) GetExec() string {
 	switch e := s.Exec.(type) {
 	case string:
 		return e
-	case []interface{}:
+	case []any:
 		result := ""
 		for i, line := range e {
 			if s, ok := line.(string); ok {
@@ -339,7 +339,7 @@ func (s *Script) GetExec() string {
 type Variable struct {
 	ID          string       `json:"id,omitempty"`
 	Key         string       `json:"key,omitempty"`
-	Value       interface{}  `json:"value,omitempty"`
+	Value       any          `json:"value,omitempty"`
 	Type        string       `json:"type,omitempty"` // "string", "boolean", "any", "number"
 	Name        string       `json:"name,omitempty"`
 	Description *Description `json:"description,omitempty"`
@@ -375,7 +375,7 @@ func (v *Variable) GetValue() string {
 // Auth represents authentication configuration
 type Auth struct {
 	Type     string          `json:"type"`
-	NoAuth   interface{}     `json:"noauth,omitempty"`
+	NoAuth   any             `json:"noauth,omitempty"`
 	APIKey   []AuthAttribute `json:"apikey,omitempty"`
 	AWSv4    []AuthAttribute `json:"awsv4,omitempty"`
 	Basic    []AuthAttribute `json:"basic,omitempty"`
@@ -402,9 +402,9 @@ func (a *Auth) GetAttribute(attrs []AuthAttribute, key string) string {
 
 // AuthAttribute represents a key-value pair for authentication
 type AuthAttribute struct {
-	Key   string      `json:"key"`
-	Value interface{} `json:"value,omitempty"`
-	Type  string      `json:"type,omitempty"`
+	Key   string `json:"key"`
+	Value any    `json:"value,omitempty"`
+	Type  string `json:"type,omitempty"`
 }
 
 // Proxy represents proxy configuration

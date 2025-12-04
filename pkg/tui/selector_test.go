@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/ideaspaper/restclient/pkg/errors"
 )
 
 // testItem is a simple implementation of Item for testing
@@ -423,8 +424,9 @@ func TestErrCancelled(t *testing.T) {
 	if ErrCancelled == nil {
 		t.Error("ErrCancelled should not be nil")
 	}
-	if ErrCancelled.Error() != "selection cancelled" {
-		t.Errorf("expected 'selection cancelled', got '%s'", ErrCancelled.Error())
+	// Check that ErrCancelled is errors.ErrCanceled using errors.Is
+	if !errors.Is(ErrCancelled, errors.ErrCanceled) {
+		t.Error("ErrCancelled should be errors.ErrCanceled")
 	}
 }
 

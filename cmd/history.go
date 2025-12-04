@@ -7,7 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ideaspaper/restclient/internal/stringutil"
 	"github.com/ideaspaper/restclient/pkg/config"
+	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/history"
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/tui"
@@ -30,7 +32,7 @@ func (h HistoryItem) FilterValue() string {
 
 // Title returns the main display text (method and URL)
 func (h HistoryItem) Title() string {
-	return fmt.Sprintf("%s %s", h.Request.Method, truncateString(h.Request.URL, 50))
+	return fmt.Sprintf("%s %s", h.Request.Method, stringutil.Truncate(h.Request.URL, 50))
 }
 
 // Description returns the timestamp
@@ -139,7 +141,7 @@ func init() {
 func runHistoryShow(cmd *cobra.Command, args []string) error {
 	histMgr, err := history.NewHistoryManager("")
 	if err != nil {
-		return fmt.Errorf("failed to load history: %w", err)
+		return errors.Wrap(err, "failed to load history")
 	}
 
 	var item models.HistoricalHttpRequest
@@ -153,7 +155,7 @@ func runHistoryShow(cmd *cobra.Command, args []string) error {
 
 		selectedItem, err := selectHistoryItem(items)
 		if err != nil {
-			if err == tui.ErrCancelled {
+			if errors.Is(err, errors.ErrCanceled) {
 				return nil
 			}
 			return err
@@ -177,23 +179,8 @@ func runHistoryShow(cmd *cobra.Command, args []string) error {
 	printHeader("Request Details:")
 	fmt.Println()
 
-	fmt.Printf("%s %s\n", printMethod(item.Method), item.URL)
-
-	fmt.Printf("Time: %s\n", time.UnixMilli(item.StartTime).Format("2006-01-02 15:04:05"))
-	fmt.Println()
-
-	if len(item.Headers) > 0 {
-		fmt.Println("Headers:")
-		for k, v := range item.Headers {
-			fmt.Printf("  %s: %s\n", k, v)
-		}
-		fmt.Println()
-	}
-
-	if item.Body != "" {
-		fmt.Println("Body:")
-		fmt.Println(item.Body)
-	}
+	formatter := newHistoryFormatter()
+	fmt.Print(formatter.FormatDetails(item))
 
 	return nil
 }
@@ -201,11 +188,11 @@ func runHistoryShow(cmd *cobra.Command, args []string) error {
 func runHistoryClear(cmd *cobra.Command, args []string) error {
 	histMgr, err := history.NewHistoryManager("")
 	if err != nil {
-		return fmt.Errorf("failed to load history: %w", err)
+		return errors.Wrap(err, "failed to load history")
 	}
 
 	if err := histMgr.Clear(); err != nil {
-		return fmt.Errorf("failed to clear history: %w", err)
+		return errors.Wrap(err, "failed to clear history")
 	}
 
 	fmt.Println("History cleared")
@@ -217,7 +204,7 @@ func runHistorySearch(cmd *cobra.Command, args []string) error {
 
 	histMgr, err := history.NewHistoryManager("")
 	if err != nil {
-		return fmt.Errorf("failed to load history: %w", err)
+		return errors.Wrap(err, "failed to load history")
 	}
 
 	items := histMgr.Search(query)
@@ -239,7 +226,7 @@ func runHistorySearch(cmd *cobra.Command, args []string) error {
 func runHistoryStats(cmd *cobra.Command, args []string) error {
 	histMgr, err := history.NewHistoryManager("")
 	if err != nil {
-		return fmt.Errorf("failed to load history: %w", err)
+		return errors.Wrap(err, "failed to load history")
 	}
 
 	stats := histMgr.GetStats()
@@ -247,35 +234,8 @@ func runHistoryStats(cmd *cobra.Command, args []string) error {
 	printHeader("History Statistics:")
 	fmt.Println()
 
-	fmt.Printf("Total Requests: %d\n", stats.TotalRequests)
-	fmt.Println()
-
-	if len(stats.MethodCounts) > 0 {
-		fmt.Println("By Method:")
-		for method, count := range stats.MethodCounts {
-			fmt.Printf("  %s: %d\n", method, count)
-		}
-		fmt.Println()
-	}
-
-	if len(stats.DomainCounts) > 0 {
-		fmt.Println("Top Domains:")
-		// Show top 5 domains
-		count := 0
-		for domain, c := range stats.DomainCounts {
-			if count >= 5 {
-				break
-			}
-			fmt.Printf("  %s: %d\n", domain, c)
-			count++
-		}
-		fmt.Println()
-	}
-
-	if !stats.OldestRequest.IsZero() {
-		fmt.Printf("Oldest Request: %s\n", stats.OldestRequest.Format("2006-01-02 15:04:05"))
-		fmt.Printf("Newest Request: %s\n", stats.NewestRequest.Format("2006-01-02 15:04:05"))
-	}
+	formatter := newHistoryFormatter()
+	fmt.Print(formatter.FormatStats(stats))
 
 	return nil
 }
@@ -283,7 +243,7 @@ func runHistoryStats(cmd *cobra.Command, args []string) error {
 func runHistoryReplay(cmd *cobra.Command, args []string) error {
 	histMgr, err := history.NewHistoryManager("")
 	if err != nil {
-		return fmt.Errorf("failed to load history: %w", err)
+		return errors.Wrap(err, "failed to load history")
 	}
 
 	var item models.HistoricalHttpRequest
@@ -297,7 +257,7 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 
 		selectedItem, err := selectHistoryItem(items)
 		if err != nil {
-			if err == tui.ErrCancelled {
+			if errors.Is(err, errors.ErrCanceled) {
 				return nil
 			}
 			return err
@@ -358,23 +318,14 @@ func selectHistoryItem(items []models.HistoricalHttpRequest) (*models.Historical
 }
 
 func printHistoryItem(item models.HistoricalHttpRequest, index int) {
-	t := time.UnixMilli(item.StartTime)
-	timeStr := t.Format("2006-01-02 15:04:05")
-
-	// Display 1-based index for user-facing output
-	displayIndex := index + 1
-
-	fmt.Printf("%s %s %s  %s\n",
-		printListIndex(displayIndex),
-		printMethod(item.Method),
-		truncateString(item.URL, 60),
-		printDimText(timeStr))
+	formatter := newHistoryFormatter()
+	fmt.Println(formatter.FormatItem(item, index))
 }
 
 func loadConfig() (*config.Config, error) {
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load config: %w", err)
+		return nil, errors.Wrap(err, "failed to load config")
 	}
 
 	if environment != "" {
@@ -384,4 +335,16 @@ func loadConfig() (*config.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// newHistoryFormatter creates a history formatter with color support
+func newHistoryFormatter() *history.Formatter {
+	if useColors() {
+		return &history.Formatter{
+			FormatIndex:  printListIndex,
+			FormatMethod: printMethod,
+			FormatTime:   printDimText,
+		}
+	}
+	return history.DefaultFormatter()
 }

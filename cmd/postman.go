@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/postman"
 	"github.com/spf13/cobra"
 )
@@ -156,7 +157,7 @@ func runPostmanImport(cmd *cobra.Command, args []string) error {
 
 	// Check if file exists
 	if _, err := os.Stat(collectionPath); os.IsNotExist(err) {
-		return fmt.Errorf("collection file not found: %s", collectionPath)
+		return errors.NewValidationErrorWithValue("collection file", collectionPath, "file not found")
 	}
 
 	// Determine output directory/file based on mode
@@ -182,7 +183,7 @@ func runPostmanImport(cmd *cobra.Command, args []string) error {
 
 	result, err := postman.Import(collectionPath, opts)
 	if err != nil {
-		return fmt.Errorf("import failed: %w", err)
+		return errors.Wrap(err, "import failed")
 	}
 
 	// Print summary
@@ -209,11 +210,11 @@ func runPostmanExport(cmd *cobra.Command, args []string) error {
 	// Validate input files
 	for _, file := range args {
 		if _, err := os.Stat(file); os.IsNotExist(err) {
-			return fmt.Errorf("file not found: %s", file)
+			return errors.NewValidationErrorWithValue("file", file, "file not found")
 		}
 		ext := strings.ToLower(filepath.Ext(file))
 		if ext != ".http" && ext != ".rest" {
-			return fmt.Errorf("invalid file type: %s (expected .http or .rest)", file)
+			return errors.NewValidationErrorWithValue("file type", file, "expected .http or .rest")
 		}
 	}
 
@@ -245,7 +246,7 @@ func runPostmanExport(cmd *cobra.Command, args []string) error {
 
 	result, err := postman.Export(args, outputFile, opts)
 	if err != nil {
-		return fmt.Errorf("export failed: %w", err)
+		return errors.Wrap(err, "export failed")
 	}
 
 	// Print summary

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/spf13/viper"
 )
 
@@ -77,9 +79,7 @@ func (vp *VariableProcessor) SetEnvironmentVariables(vars map[string]map[string]
 
 // SetFileVariables merges file variables into existing ones
 func (vp *VariableProcessor) SetFileVariables(vars map[string]string) {
-	for k, v := range vars {
-		vp.fileVariables[k] = v
-	}
+	maps.Copy(vp.fileVariables, vars)
 }
 
 // SetRequestResult stores a request result for request variables
@@ -176,7 +176,7 @@ func (vp *VariableProcessor) resolveVariable(name string) (string, error) {
 func (vp *VariableProcessor) resolveSystemVariable(name string) (string, error) {
 	parts := strings.Fields(name)
 	if len(parts) == 0 {
-		return "", fmt.Errorf("empty system variable")
+		return "", errors.NewValidationError("system variable", "empty variable name")
 	}
 
 	varName := parts[0]
@@ -207,7 +207,7 @@ func (vp *VariableProcessor) resolveSystemVariable(name string) (string, error) 
 		return vp.resolvePrompt(parts[1:])
 
 	default:
-		return "", fmt.Errorf("unknown system variable: %s", varName)
+		return "", errors.NewValidationErrorWithValue("system variable", varName, "unknown variable")
 	}
 }
 
@@ -218,7 +218,7 @@ func (vp *VariableProcessor) resolveTimestamp(args []string) (string, error) {
 	if len(args) >= 2 {
 		offset, err := strconv.Atoi(args[0])
 		if err != nil {
-			return "", fmt.Errorf("invalid timestamp offset: %s", args[0])
+			return "", errors.NewValidationErrorWithValue("timestamp offset", args[0], "must be an integer")
 		}
 		unit := args[1]
 		t = addDuration(t, offset, unit)
@@ -230,7 +230,7 @@ func (vp *VariableProcessor) resolveTimestamp(args []string) (string, error) {
 // resolveDatetime resolves $datetime with format and optional offset
 func (vp *VariableProcessor) resolveDatetime(args []string, local bool) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("datetime format required")
+		return "", errors.NewValidationError("$datetime", "format argument required")
 	}
 
 	format := args[0]
@@ -243,7 +243,7 @@ func (vp *VariableProcessor) resolveDatetime(args []string, local bool) (string,
 	if len(args) >= 3 {
 		offset, err := strconv.Atoi(args[1])
 		if err != nil {
-			return "", fmt.Errorf("invalid datetime offset: %s", args[1])
+			return "", errors.NewValidationErrorWithValue("datetime offset", args[1], "must be an integer")
 		}
 		unit := args[2]
 		t = addDuration(t, offset, unit)
@@ -265,21 +265,21 @@ func (vp *VariableProcessor) resolveDatetime(args []string, local bool) (string,
 // resolveRandomInt resolves $randomInt min max
 func (vp *VariableProcessor) resolveRandomInt(args []string) (string, error) {
 	if len(args) < 2 {
-		return "", fmt.Errorf("randomInt requires min and max arguments")
+		return "", errors.NewValidationError("$randomInt", "requires min and max arguments")
 	}
 
 	min, err := strconv.Atoi(args[0])
 	if err != nil {
-		return "", fmt.Errorf("invalid min value: %s", args[0])
+		return "", errors.NewValidationErrorWithValue("min", args[0], "must be an integer")
 	}
 
 	max, err := strconv.Atoi(args[1])
 	if err != nil {
-		return "", fmt.Errorf("invalid max value: %s", args[1])
+		return "", errors.NewValidationErrorWithValue("max", args[1], "must be an integer")
 	}
 
 	if min >= max {
-		return "", fmt.Errorf("min must be less than max")
+		return "", errors.NewValidationError("$randomInt", "min must be less than max")
 	}
 
 	// Generate random number using uint32 to avoid overflow issues
@@ -295,7 +295,7 @@ func (vp *VariableProcessor) resolveRandomInt(args []string) (string, error) {
 // resolveProcessEnv resolves $processEnv varName
 func (vp *VariableProcessor) resolveProcessEnv(args []string) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("processEnv requires variable name")
+		return "", errors.NewValidationError("$processEnv", "requires variable name")
 	}
 
 	varName := args[0]
@@ -315,7 +315,7 @@ func (vp *VariableProcessor) resolveProcessEnv(args []string) (string, error) {
 // resolveDotenv resolves $dotenv varName
 func (vp *VariableProcessor) resolveDotenv(args []string) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("dotenv requires variable name")
+		return "", errors.NewValidationError("$dotenv", "requires variable name")
 	}
 
 	varName := args[0]
@@ -351,12 +351,12 @@ func (vp *VariableProcessor) resolveDotenv(args []string) (string, error) {
 	v.SetConfigType("env")
 
 	if err := v.ReadInConfig(); err != nil {
-		return "", fmt.Errorf("dotenv file not found: %w", err)
+		return "", errors.Wrapf(err, "dotenv file not found: %s", envFile)
 	}
 
 	val := v.GetString(varName)
 	if val == "" && !v.IsSet(varName) {
-		return "", fmt.Errorf("dotenv variable not found: %s", varName)
+		return "", errors.NewValidationErrorWithValue("dotenv variable", varName, "not found")
 	}
 
 	return val, nil
@@ -365,7 +365,7 @@ func (vp *VariableProcessor) resolveDotenv(args []string) (string, error) {
 // resolvePrompt resolves $prompt variable by prompting the user for input
 func (vp *VariableProcessor) resolvePrompt(args []string) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("$prompt requires a variable name")
+		return "", errors.NewValidationError("$prompt", "requires a variable name")
 	}
 
 	varName := args[0]
@@ -386,7 +386,7 @@ func (vp *VariableProcessor) resolvePrompt(args []string) (string, error) {
 		return vp.promptHandler(varName, description, isPassword)
 	}
 
-	return "", fmt.Errorf("no prompt handler configured for $prompt %s", varName)
+	return "", errors.NewValidationErrorWithValue("$prompt", varName, "no prompt handler configured")
 }
 
 // resolveEnvironmentVariable resolves an environment variable from config
@@ -410,7 +410,7 @@ func (vp *VariableProcessor) resolveEnvironmentVariable(name string) (string, er
 		}
 	}
 
-	return "", fmt.Errorf("environment variable not found: %s", name)
+	return "", errors.NewValidationErrorWithValue("environment variable", name, "not found")
 }
 
 // resolveRequestVariable resolves a request variable (e.g., loginAPI.response.body.$.token)
@@ -419,7 +419,7 @@ func (vp *VariableProcessor) resolveRequestVariable(name string) (string, error)
 	// Format: requestName.(response|request).(body|headers).(path|headerName)
 	parts := strings.SplitN(name, ".", 4)
 	if len(parts) < 4 {
-		return "", fmt.Errorf("invalid request variable format: %s", name)
+		return "", errors.NewValidationErrorWithValue("request variable", name, "invalid format (expected: requestName.response.body.path)")
 	}
 
 	requestName := parts[0]
@@ -429,7 +429,7 @@ func (vp *VariableProcessor) resolveRequestVariable(name string) (string, error)
 
 	result, ok := vp.requestResults[requestName]
 	if !ok {
-		return "", fmt.Errorf("request '%s' not found in cache", requestName)
+		return "", errors.NewValidationErrorWithValue("request", requestName, "not found in cache")
 	}
 
 	if reqOrResp == "response" {
@@ -443,11 +443,11 @@ func (vp *VariableProcessor) resolveRequestVariable(name string) (string, error)
 					return v[0], nil
 				}
 			}
-			return "", fmt.Errorf("header '%s' not found", path)
+			return "", errors.NewValidationErrorWithValue("header", path, "not found")
 		}
 	}
 
-	return "", fmt.Errorf("unsupported request variable: %s", name)
+	return "", errors.NewValidationErrorWithValue("request variable", name, "unsupported format")
 }
 
 // addDuration adds a duration to a time based on unit
@@ -515,7 +515,7 @@ func convertDateFormat(format string) string {
 // This properly handles multi-byte UTF-8 characters by encoding each byte.
 func urlEncode(s string) string {
 	var builder strings.Builder
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if isURLSafe(c) {
 			builder.WriteByte(c)
@@ -544,7 +544,7 @@ func extractFromBody(body, path string) (string, error) {
 		return extractJSONPath(body, path)
 	}
 
-	return "", fmt.Errorf("unsupported path format: %s (only JSONPath with $. or $[ prefix is supported)", path)
+	return "", errors.NewValidationErrorWithValue("path", path, "unsupported path format (only JSONPath with $. or $[ prefix is supported)")
 }
 
 // extractJSONPath extracts a value using JSONPath with proper JSON parsing
@@ -552,7 +552,7 @@ func extractJSONPath(body, path string) (string, error) {
 	// Parse JSON into a generic structure
 	var data any
 	if err := json.Unmarshal([]byte(body), &data); err != nil {
-		return "", fmt.Errorf("invalid JSON: %w", err)
+		return "", errors.Wrap(err, "invalid JSON body")
 	}
 
 	// Remove $ prefix and split path
@@ -583,11 +583,11 @@ func extractJSONPath(body, path string) (string, error) {
 			if fieldName != "" {
 				obj, ok := current.(map[string]any)
 				if !ok {
-					return "", fmt.Errorf("expected object at '%s', got %T", fieldName, current)
+					return "", errors.NewValidationError("JSONPath", fmt.Sprintf("expected object at '%s', got %T", fieldName, current))
 				}
 				val, exists := obj[fieldName]
 				if !exists {
-					return "", fmt.Errorf("field '%s' not found", fieldName)
+					return "", errors.NewValidationError("JSONPath", fmt.Sprintf("field '%s' not found", fieldName))
 				}
 				current = val
 			}
@@ -595,16 +595,16 @@ func extractJSONPath(body, path string) (string, error) {
 			// Now get array element
 			arr, ok := current.([]any)
 			if !ok {
-				return "", fmt.Errorf("expected array, got %T", current)
+				return "", errors.NewValidationError("JSONPath", fmt.Sprintf("expected array, got %T", current))
 			}
 
 			index, err := strconv.Atoi(indexStr)
 			if err != nil {
-				return "", fmt.Errorf("invalid array index: %s", indexStr)
+				return "", errors.NewValidationErrorWithValue("array index", indexStr, "must be a valid integer")
 			}
 
 			if index < 0 || index >= len(arr) {
-				return "", fmt.Errorf("array index out of bounds: %d (length %d)", index, len(arr))
+				return "", errors.NewValidationError("array index", fmt.Sprintf("index %d out of bounds (length %d)", index, len(arr)))
 			}
 
 			current = arr[index]
@@ -612,12 +612,12 @@ func extractJSONPath(body, path string) (string, error) {
 			// Regular field access
 			obj, ok := current.(map[string]any)
 			if !ok {
-				return "", fmt.Errorf("expected object at '%s', got %T", part, current)
+				return "", errors.NewValidationError("JSONPath", fmt.Sprintf("expected object at '%s', got %T", part, current))
 			}
 
 			val, exists := obj[part]
 			if !exists {
-				return "", fmt.Errorf("field '%s' not found", part)
+				return "", errors.NewValidationError("JSONPath", fmt.Sprintf("field '%s' not found", part))
 			}
 			current = val
 		}

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ideaspaper/restclient/internal/stringutil"
+	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/session"
 )
 
@@ -105,21 +106,21 @@ func runSessionShow(cmd *cobra.Command, args []string) error {
 		// Use specified directory
 		absPath, err := filepath.Abs(sessionDir)
 		if err != nil {
-			return fmt.Errorf("failed to resolve directory: %w", err)
+			return errors.Wrap(err, "failed to resolve directory")
 		}
 		httpFilePath = filepath.Join(absPath, "dummy.http")
 	} else if sessionName == "" {
 		// Use current directory
 		cwd, err := os.Getwd()
 		if err != nil {
-			return fmt.Errorf("failed to get current directory: %w", err)
+			return errors.Wrap(err, "failed to get current directory")
 		}
 		httpFilePath = filepath.Join(cwd, "dummy.http")
 	}
 
 	sessionMgr, err := session.NewSessionManager("", httpFilePath, sessionName)
 	if err != nil {
-		return fmt.Errorf("failed to initialize session: %w", err)
+		return errors.Wrap(err, "failed to initialize session")
 	}
 
 	if err := sessionMgr.Load(); err != nil {
@@ -174,7 +175,7 @@ func runSessionClear(cmd *cobra.Command, args []string) error {
 	// Clear all sessions
 	if clearAllFlag {
 		if err := session.ClearAllSessions(""); err != nil {
-			return fmt.Errorf("failed to clear all sessions: %w", err)
+			return errors.Wrap(err, "failed to clear all sessions")
 		}
 		fmt.Println("All sessions cleared.")
 		return nil
@@ -185,20 +186,20 @@ func runSessionClear(cmd *cobra.Command, args []string) error {
 	if sessionDir != "" {
 		absPath, err := filepath.Abs(sessionDir)
 		if err != nil {
-			return fmt.Errorf("failed to resolve directory: %w", err)
+			return errors.Wrap(err, "failed to resolve directory")
 		}
 		httpFilePath = filepath.Join(absPath, "dummy.http")
 	} else if sessionName == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return fmt.Errorf("failed to get current directory: %w", err)
+			return errors.Wrap(err, "failed to get current directory")
 		}
 		httpFilePath = filepath.Join(cwd, "dummy.http")
 	}
 
 	sessionMgr, err := session.NewSessionManager("", httpFilePath, sessionName)
 	if err != nil {
-		return fmt.Errorf("failed to initialize session: %w", err)
+		return errors.Wrap(err, "failed to initialize session")
 	}
 
 	// Load existing data first
@@ -208,19 +209,19 @@ func runSessionClear(cmd *cobra.Command, args []string) error {
 	if clearCookies && !clearVariables {
 		sessionMgr.ClearCookies()
 		if err := sessionMgr.SaveCookies(); err != nil {
-			return fmt.Errorf("failed to save session: %w", err)
+			return errors.Wrap(err, "failed to save session")
 		}
 		fmt.Println("Cookies cleared.")
 	} else if clearVariables && !clearCookies {
 		sessionMgr.ClearVariables()
 		if err := sessionMgr.SaveVariables(); err != nil {
-			return fmt.Errorf("failed to save session: %w", err)
+			return errors.Wrap(err, "failed to save session")
 		}
 		fmt.Println("Variables cleared.")
 	} else {
 		// Clear everything and delete the session directory
 		if err := sessionMgr.Delete(); err != nil {
-			return fmt.Errorf("failed to delete session: %w", err)
+			return errors.Wrap(err, "failed to delete session")
 		}
 		fmt.Println("Session cleared.")
 	}
@@ -231,7 +232,7 @@ func runSessionClear(cmd *cobra.Command, args []string) error {
 func runSessionList(cmd *cobra.Command, args []string) error {
 	sessions, err := session.ListAllSessions("")
 	if err != nil {
-		return fmt.Errorf("failed to list sessions: %w", err)
+		return errors.Wrap(err, "failed to list sessions")
 	}
 
 	if len(sessions) == 0 {
@@ -266,7 +267,7 @@ func truncateValue(s string, maxLen int) string {
 }
 
 // formatValue formats a value for display
-func formatValue(v interface{}) string {
+func formatValue(v any) string {
 	switch val := v.(type) {
 	case string:
 		return val
@@ -275,7 +276,7 @@ func formatValue(v interface{}) string {
 			return fmt.Sprintf("%d", int64(val))
 		}
 		return fmt.Sprintf("%v", val)
-	case map[string]interface{}, []interface{}:
+	case map[string]any, []any:
 		bytes, err := json.Marshal(val)
 		if err != nil {
 			return fmt.Sprintf("%v", val)

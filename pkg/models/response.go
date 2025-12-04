@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ideaspaper/restclient/internal/constants"
 )
 
 // HttpResponse represents an HTTP response
@@ -84,7 +86,7 @@ func (r *HttpResponse) GetHeader(name string) string {
 // IsJSON returns true if the response is JSON
 func (r *HttpResponse) IsJSON() bool {
 	ct := r.ContentType()
-	return strings.Contains(ct, "application/json") || strings.Contains(ct, "+json")
+	return strings.Contains(ct, constants.MIMEApplicationJSON) || strings.Contains(ct, "+json")
 }
 
 // IsXML returns true if the response is XML

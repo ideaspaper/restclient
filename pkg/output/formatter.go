@@ -181,7 +181,7 @@ func (f *Formatter) formatTiming(resp *models.HttpResponse) string {
 // formatJSON formats and colorizes JSON
 func (f *Formatter) formatJSON(body string) string {
 	// First, try to parse and pretty-print
-	var data interface{}
+	var data any
 	if err := json.Unmarshal([]byte(body), &data); err != nil {
 		return ""
 	}

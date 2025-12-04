@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"github.com/fatih/color"
-
-	"github.com/ideaspaper/restclient/internal/stringutil"
 )
 
 // useColors returns true if colored output should be used.
@@ -22,6 +20,7 @@ var (
 	headerColor = color.New(color.FgCyan)
 
 	successColor = color.New(color.FgGreen)
+	successBold  = color.New(color.FgGreen, color.Bold)
 	errorColor   = color.New(color.FgRed)
 	warnColor    = color.New(color.FgYellow)
 
@@ -89,21 +88,20 @@ func printKeyValue(key, value string) {
 	}
 }
 
-// printSuccess prints a success message
-func printSuccess(msg string) {
+// formatKey returns a key string with color if enabled
+func formatKey(key string) string {
 	if useColors() {
-		successColor.Println(msg)
-	} else {
-		fmt.Println(msg)
+		return keyColor.Sprint(key)
 	}
+	return key
 }
 
-// printError prints an error message
-func printError(msg string) {
+// printMethodURL prints method and URL with bold green color
+func printMethodURL(method, url string) {
 	if useColors() {
-		errorColor.Println(msg)
+		successBold.Printf("%s %s\n", method, url)
 	} else {
-		fmt.Println(msg)
+		fmt.Printf("%s %s\n", method, url)
 	}
 }
 
@@ -116,10 +114,4 @@ func printMarker(marked bool) string {
 		return "* "
 	}
 	return "  "
-}
-
-// truncateString truncates a string to maxLen and adds ellipsis
-// Deprecated: Use stringutil.Truncate from pkg/internal/stringutil instead
-func truncateString(s string, maxLen int) string {
-	return stringutil.Truncate(s, maxLen)
 }

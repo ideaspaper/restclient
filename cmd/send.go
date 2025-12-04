@@ -12,10 +12,12 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/ideaspaper/restclient/internal/stringutil"
 	"github.com/ideaspaper/restclient/pkg/config"
+	"github.com/ideaspaper/restclient/pkg/errors"
+	"github.com/ideaspaper/restclient/pkg/executor"
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/parser"
-	"github.com/ideaspaper/restclient/pkg/scripting"
 	"github.com/ideaspaper/restclient/pkg/tui"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
@@ -38,7 +40,7 @@ func (r RequestItem) FilterValue() string {
 
 // Title returns the main display text (method and URL)
 func (r RequestItem) Title() string {
-	return fmt.Sprintf("%s %s", r.Request.Method, truncateString(r.Request.URL, 50))
+	return fmt.Sprintf("%s %s", r.Request.Method, stringutil.Truncate(r.Request.URL, 50))
 }
 
 // Description returns the request name
@@ -116,7 +118,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return errors.Wrap(err, "failed to load config")
 	}
 
 	if environment != "" {
@@ -127,7 +129,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to read file: %w", err)
+		return errors.Wrap(err, "failed to read file")
 	}
 
 	fileVarsResult := variables.ParseFileVariablesWithDuplicates(string(content))
@@ -187,7 +189,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 		}
 
 		if strictMode {
-			return fmt.Errorf("duplicate @name values found (use without --strict to continue with warnings)")
+			return errors.NewValidationError("@name", "duplicate @name values found (use without --strict to continue with warnings)")
 		}
 	}
 
@@ -203,7 +205,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(requests) == 0 {
-		return fmt.Errorf("no requests found in file")
+		return errors.NewValidationError("requests", "no requests found in file")
 	}
 
 	var request *models.HttpRequest
@@ -215,19 +217,19 @@ func runSend(cmd *cobra.Command, args []string) error {
 			}
 		}
 		if request == nil {
-			return fmt.Errorf("request with name '%s' not found", requestName)
+			return errors.NewValidationErrorWithValue("request name", requestName, "request not found")
 		}
 	} else if cmd.Flags().Changed("index") {
 		internalIndex := requestIndex - 1
 		if internalIndex < 0 || internalIndex >= len(requests) {
-			return fmt.Errorf("request index %d out of range (1-%d)", requestIndex, len(requests))
+			return errors.NewValidationErrorWithValue("request index", fmt.Sprintf("%d", requestIndex), fmt.Sprintf("out of range (1-%d)", len(requests)))
 		}
 		request = requests[internalIndex]
 	} else {
 		if len(requests) > 1 {
 			request, err = selectRequest(requests)
 			if err != nil {
-				if err == tui.ErrCancelled {
+				if errors.Is(err, errors.ErrCanceled) {
 					return nil
 				}
 				return err
@@ -241,46 +243,38 @@ func runSend(cmd *cobra.Command, args []string) error {
 	for _, pv := range request.Metadata.Prompts {
 		value, err := promptHandler(pv.Name, pv.Description, pv.IsPassword)
 		if err != nil {
-			return fmt.Errorf("failed to get input for %s: %w", pv.Name, err)
+			return errors.Wrapf(err, "failed to get input for %s", pv.Name)
 		}
 		varProcessor.SetFileVariables(map[string]string{pv.Name: value})
 	}
 
 	// Execute pre-request script before variable processing so scripts can set variables
 	if request.Metadata.PreScript != "" {
-		scriptCtx := setupScriptContext(cfg, request, nil)
-
-		engine := scripting.NewEngine()
-		result, err := engine.Execute(request.Metadata.PreScript, scriptCtx)
+		result, err := executor.ExecutePreScript(request.Metadata.PreScript, cfg, request, varProcessor)
 		if err != nil {
-			return fmt.Errorf("pre-request script error: %w", err)
-		}
-		if result.Error != nil {
-			return fmt.Errorf("pre-request script failed: %w", result.Error)
+			return err
 		}
 
 		for _, log := range result.Logs {
 			fmt.Printf("[pre-script] %s\n", log)
 		}
-
-		applyScriptGlobalVars(varProcessor, result.GlobalVars)
 	}
 
 	var varErr error
 	request.URL, varErr = varProcessor.Process(request.URL)
 	if varErr != nil {
-		return fmt.Errorf("failed to process variables in URL: %w", varErr)
+		return errors.Wrap(varErr, "failed to process variables in URL")
 	}
 	for k, v := range request.Headers {
 		request.Headers[k], varErr = varProcessor.Process(v)
 		if varErr != nil {
-			return fmt.Errorf("failed to process variables in header %s: %w", k, varErr)
+			return errors.Wrapf(varErr, "failed to process variables in header %s", k)
 		}
 	}
 	if request.RawBody != "" {
 		request.RawBody, varErr = varProcessor.Process(request.RawBody)
 		if varErr != nil {
-			return fmt.Errorf("failed to process variables in body: %w", varErr)
+			return errors.Wrap(varErr, "failed to process variables in body")
 		}
 		request.Body = strings.NewReader(request.RawBody)
 	}
@@ -296,7 +290,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 			for _, e := range validation.Errors {
 				fmt.Fprintf(os.Stderr, "  - %s: %s\n", e.Field, e.Message)
 			}
-			return fmt.Errorf("request validation failed: %s", validation.Error())
+			return errors.NewValidationError("request", validation.Error())
 		}
 	}
 

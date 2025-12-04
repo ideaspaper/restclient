@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ideaspaper/restclient/pkg/config"
+	"github.com/ideaspaper/restclient/pkg/errors"
 )
 
 // envCmd represents the env command
@@ -120,7 +121,7 @@ func init() {
 func runEnvList(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return errors.Wrap(err, "failed to load config")
 	}
 
 	envs := cfg.ListEnvironments()
@@ -154,7 +155,7 @@ func runEnvList(cmd *cobra.Command, args []string) error {
 func runEnvCurrent(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return errors.Wrap(err, "failed to load config")
 	}
 
 	if cfg.CurrentEnvironment == "" {
@@ -173,7 +174,7 @@ func runEnvUse(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return errors.Wrap(err, "failed to load config")
 	}
 
 	if err := cfg.SetEnvironment(envName); err != nil {
@@ -181,7 +182,7 @@ func runEnvUse(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
+		return errors.Wrap(err, "failed to save config")
 	}
 
 	fmt.Printf("Switched to environment: %s\n", envName)
@@ -191,7 +192,7 @@ func runEnvUse(cmd *cobra.Command, args []string) error {
 func runEnvShow(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return errors.Wrap(err, "failed to load config")
 	}
 
 	envName := cfg.CurrentEnvironment
@@ -206,7 +207,7 @@ func runEnvShow(cmd *cobra.Command, args []string) error {
 
 	vars, ok := cfg.EnvironmentVariables[envName]
 	if !ok && envName != "$shared" {
-		return fmt.Errorf("environment '%s' not found", envName)
+		return errors.NewValidationErrorWithValue("environment", envName, "environment not found")
 	}
 
 	// Show $shared first if showing a specific environment
@@ -235,7 +236,7 @@ func runEnvSet(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return errors.Wrap(err, "failed to load config")
 	}
 
 	if err := cfg.SetEnvironmentVariable(envName, varName, varValue); err != nil {
@@ -243,7 +244,7 @@ func runEnvSet(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
+		return errors.Wrap(err, "failed to save config")
 	}
 
 	fmt.Printf("Set %s=%s in environment '%s'\n", varName, maskValue(varValue), envName)
@@ -256,22 +257,22 @@ func runEnvUnset(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return errors.Wrap(err, "failed to load config")
 	}
 
 	vars, ok := cfg.EnvironmentVariables[envName]
 	if !ok {
-		return fmt.Errorf("environment '%s' not found", envName)
+		return errors.NewValidationErrorWithValue("environment", envName, "environment not found")
 	}
 
 	if _, exists := vars[varName]; !exists {
-		return fmt.Errorf("variable '%s' not found in environment '%s'", varName, envName)
+		return errors.NewValidationError("variable", fmt.Sprintf("variable '%s' not found in environment '%s'", varName, envName))
 	}
 
 	delete(vars, varName)
 
 	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
+		return errors.Wrap(err, "failed to save config")
 	}
 
 	fmt.Printf("Removed %s from environment '%s'\n", varName, envName)
@@ -283,11 +284,11 @@ func runEnvCreate(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return errors.Wrap(err, "failed to load config")
 	}
 
 	if _, exists := cfg.EnvironmentVariables[envName]; exists {
-		return fmt.Errorf("environment '%s' already exists", envName)
+		return errors.NewValidationErrorWithValue("environment", envName, "environment already exists")
 	}
 
 	if err := cfg.AddEnvironment(envName, nil); err != nil {
@@ -295,7 +296,7 @@ func runEnvCreate(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
+		return errors.Wrap(err, "failed to save config")
 	}
 
 	fmt.Printf("Created environment: %s\n", envName)
@@ -309,7 +310,7 @@ func runEnvDelete(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+		return errors.Wrap(err, "failed to load config")
 	}
 
 	if err := cfg.RemoveEnvironment(envName); err != nil {
@@ -317,7 +318,7 @@ func runEnvDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := cfg.Save(); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
+		return errors.Wrap(err, "failed to save config")
 	}
 
 	fmt.Printf("Deleted environment: %s\n", envName)

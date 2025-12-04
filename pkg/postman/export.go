@@ -2,7 +2,6 @@ package postman
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -10,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/ideaspaper/restclient/internal/constants"
+	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/parser"
 	"github.com/ideaspaper/restclient/pkg/variables"
@@ -91,7 +92,7 @@ func Export(httpFiles []string, outputPath string, opts ExportOptions) (*ExportR
 	for _, httpFile := range httpFiles {
 		content, err := os.ReadFile(httpFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read file %s: %w", httpFile, err)
+			return nil, errors.Wrapf(err, "failed to read file %s", httpFile)
 		}
 
 		// Parse file variables
@@ -116,7 +117,7 @@ func Export(httpFiles []string, outputPath string, opts ExportOptions) (*ExportR
 		p := parser.NewHttpRequestParser(string(content), nil, baseDir)
 		requests, err := p.ParseAll()
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse file %s: %w", httpFile, err)
+			return nil, errors.Wrapf(err, "failed to parse file %s", httpFile)
 		}
 
 		// Convert to Postman items
@@ -178,12 +179,12 @@ func Export(httpFiles []string, outputPath string, opts ExportOptions) (*ExportR
 		jsonData, err = json.Marshal(collection)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize collection: %w", err)
+		return nil, errors.Wrap(err, "failed to serialize collection")
 	}
 
 	// Write to file
 	if err := os.WriteFile(outputPath, jsonData, 0644); err != nil {
-		return nil, fmt.Errorf("failed to write collection file: %w", err)
+		return nil, errors.Wrap(err, "failed to write collection file")
 	}
 
 	result.CollectionPath = outputPath
@@ -218,7 +219,7 @@ func ExportToCollection(httpFiles []string, opts ExportOptions) (*Collection, er
 	for _, httpFile := range httpFiles {
 		content, err := os.ReadFile(httpFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read file %s: %w", httpFile, err)
+			return nil, errors.Wrapf(err, "failed to read file %s", httpFile)
 		}
 
 		if opts.IncludeVariables {
@@ -232,7 +233,7 @@ func ExportToCollection(httpFiles []string, opts ExportOptions) (*Collection, er
 		p := parser.NewHttpRequestParser(string(content), nil, baseDir)
 		requests, err := p.ParseAll()
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse file %s: %w", httpFile, err)
+			return nil, errors.Wrapf(err, "failed to parse file %s", httpFile)
 		}
 
 		for _, req := range requests {
@@ -632,7 +633,7 @@ func convertBody(req *models.HttpRequest) *Body {
 	// Check for GraphQL
 	if isGraphQLRequest(contentType, req.URL) {
 		// Try to parse as GraphQL JSON
-		var gqlPayload map[string]interface{}
+		var gqlPayload map[string]any
 		if err := json.Unmarshal([]byte(req.RawBody), &gqlPayload); err == nil {
 			if query, ok := gqlPayload["query"].(string); ok {
 				body.Mode = "graphql"
@@ -664,7 +665,7 @@ func convertBody(req *models.HttpRequest) *Body {
 	body.Raw = req.RawBody
 
 	// Set language hint based on content type
-	if strings.Contains(strings.ToLower(contentType), "application/json") {
+	if strings.Contains(strings.ToLower(contentType), constants.MIMEApplicationJSON) {
 		body.Options = &BodyOptions{
 			Raw: &RawOptions{
 				Language: "json",

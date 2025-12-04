@@ -3,6 +3,7 @@ package history
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ideaspaper/restclient/internal/filesystem"
 	"github.com/ideaspaper/restclient/internal/paths"
 	"github.com/ideaspaper/restclient/internal/stringutil"
+	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/models"
 )
 
@@ -22,36 +25,54 @@ const (
 
 // HistoryManager manages request history
 type HistoryManager struct {
+	fs          filesystem.FileSystem
 	historyPath string
 	items       []models.HistoricalHttpRequest
 }
 
 // NewHistoryManager creates a new history manager
 func NewHistoryManager(dataDir string) (*HistoryManager, error) {
+	return NewHistoryManagerWithFS(filesystem.Default, dataDir)
+}
+
+// NewHistoryManagerWithFS creates a new history manager with a custom file system.
+// This is primarily useful for testing.
+func NewHistoryManagerWithFS(fs filesystem.FileSystem, dataDir string) (*HistoryManager, error) {
+	if fs == nil {
+		fs = filesystem.Default
+	}
+
 	if dataDir == "" {
 		appDir, err := paths.AppDataDir("")
 		if err != nil {
-			return nil, fmt.Errorf("failed to get app data directory: %w", err)
+			return nil, errors.Wrap(err, "failed to get app data directory")
 		}
 		dataDir = appDir
 	}
 
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create data directory: %w", err)
+	if err := fs.MkdirAll(dataDir, 0755); err != nil {
+		return nil, errors.Wrap(err, "failed to create data directory")
 	}
 
 	hm := &HistoryManager{
+		fs:          fs,
 		historyPath: filepath.Join(dataDir, historyFileName),
 		items:       make([]models.HistoricalHttpRequest, 0),
 	}
 
 	if err := hm.load(); err != nil {
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("failed to load history: %w", err)
+		if !isNotExist(err) {
+			return nil, errors.Wrap(err, "failed to load history")
 		}
 	}
 
 	return hm, nil
+}
+
+// isNotExist checks if the error indicates a file does not exist.
+// Works with both os.PathError and fs.PathError.
+func isNotExist(err error) bool {
+	return os.IsNotExist(err) || errors.Is(err, fs.ErrNotExist)
 }
 
 // Add adds a request to history
@@ -89,7 +110,7 @@ func (hm *HistoryManager) GetRecent(n int) []models.HistoricalHttpRequest {
 // GetByIndex returns a history item by index (0-based internally, but error message shows 1-based for user)
 func (hm *HistoryManager) GetByIndex(index int) (*models.HistoricalHttpRequest, error) {
 	if index < 0 || index >= len(hm.items) {
-		return nil, fmt.Errorf("index out of range: valid range is 1-%d", len(hm.items))
+		return nil, errors.NewValidationError("index", fmt.Sprintf("out of range: valid range is 1-%d", len(hm.items)))
 	}
 	return &hm.items[index], nil
 }
@@ -114,7 +135,7 @@ func (hm *HistoryManager) Clear() error {
 // Remove removes a history item by index
 func (hm *HistoryManager) Remove(index int) error {
 	if index < 0 || index >= len(hm.items) {
-		return fmt.Errorf("index out of range: %d", index)
+		return errors.NewValidationError("index", fmt.Sprintf("out of range: %d", index))
 	}
 
 	hm.items = slices.Delete(hm.items, index, index+1)
@@ -123,16 +144,16 @@ func (hm *HistoryManager) Remove(index int) error {
 
 // load loads history from file
 func (hm *HistoryManager) load() error {
-	data, err := os.ReadFile(hm.historyPath)
+	data, err := hm.fs.ReadFile(hm.historyPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if isNotExist(err) {
 			return err
 		}
-		return fmt.Errorf("failed to read history file: %w", err)
+		return errors.Wrap(err, "failed to read history file")
 	}
 
 	if err := json.Unmarshal(data, &hm.items); err != nil {
-		return fmt.Errorf("failed to parse history file: %w", err)
+		return errors.Wrap(err, "failed to parse history file")
 	}
 	return nil
 }
@@ -141,10 +162,10 @@ func (hm *HistoryManager) load() error {
 func (hm *HistoryManager) save() error {
 	data, err := json.MarshalIndent(hm.items, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal history: %w", err)
+		return errors.Wrap(err, "failed to marshal history")
 	}
 
-	return os.WriteFile(hm.historyPath, data, 0644)
+	return hm.fs.WriteFile(hm.historyPath, data, 0644)
 }
 
 // FormatHistoryItem formats a history item for display (1-based index for users)
@@ -233,4 +254,96 @@ func SortByURL(items []models.HistoricalHttpRequest) {
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].URL < items[j].URL
 	})
+}
+
+// Formatter handles history display formatting
+type Formatter struct {
+	// FormatIndex formats the index number (e.g., "[1]")
+	FormatIndex func(index int) string
+	// FormatMethod formats the HTTP method
+	FormatMethod func(method string) string
+	// FormatTime formats the timestamp in dim/muted style
+	FormatTime func(timeStr string) string
+}
+
+// DefaultFormatter returns a formatter with no colors
+func DefaultFormatter() *Formatter {
+	return &Formatter{
+		FormatIndex:  func(i int) string { return fmt.Sprintf("[%d]", i) },
+		FormatMethod: func(m string) string { return m },
+		FormatTime:   func(t string) string { return t },
+	}
+}
+
+// FormatItem formats a history item for display
+func (f *Formatter) FormatItem(item models.HistoricalHttpRequest, index int) string {
+	t := time.UnixMilli(item.StartTime)
+	timeStr := t.Format("2006-01-02 15:04:05")
+
+	// Display 1-based index for user-facing output
+	displayIndex := index + 1
+
+	return fmt.Sprintf("%s %s %s  %s",
+		f.FormatIndex(displayIndex),
+		f.FormatMethod(item.Method),
+		truncateURL(item.URL, 60),
+		f.FormatTime(timeStr))
+}
+
+// FormatDetails formats full details of a history item
+func (f *Formatter) FormatDetails(item models.HistoricalHttpRequest) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("%s %s\n", f.FormatMethod(item.Method), item.URL))
+	sb.WriteString(fmt.Sprintf("Time: %s\n", time.UnixMilli(item.StartTime).Format("2006-01-02 15:04:05")))
+
+	if len(item.Headers) > 0 {
+		sb.WriteString("\nHeaders:\n")
+		for k, v := range item.Headers {
+			sb.WriteString(fmt.Sprintf("  %s: %s\n", k, v))
+		}
+	}
+
+	if item.Body != "" {
+		sb.WriteString("\nBody:\n")
+		sb.WriteString(item.Body)
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// FormatStats formats history statistics
+func (f *Formatter) FormatStats(stats HistoryStats) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("Total Requests: %d\n\n", stats.TotalRequests))
+
+	if len(stats.MethodCounts) > 0 {
+		sb.WriteString("By Method:\n")
+		for method, count := range stats.MethodCounts {
+			sb.WriteString(fmt.Sprintf("  %s: %d\n", method, count))
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(stats.DomainCounts) > 0 {
+		sb.WriteString("Top Domains:\n")
+		count := 0
+		for domain, c := range stats.DomainCounts {
+			if count >= 5 {
+				break
+			}
+			sb.WriteString(fmt.Sprintf("  %s: %d\n", domain, c))
+			count++
+		}
+		sb.WriteString("\n")
+	}
+
+	if !stats.OldestRequest.IsZero() {
+		sb.WriteString(fmt.Sprintf("Oldest Request: %s\n", stats.OldestRequest.Format("2006-01-02 15:04:05")))
+		sb.WriteString(fmt.Sprintf("Newest Request: %s\n", stats.NewestRequest.Format("2006-01-02 15:04:05")))
+	}
+
+	return sb.String()
 }

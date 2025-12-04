@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ideaspaper/restclient/pkg/config"
+	"github.com/ideaspaper/restclient/pkg/errors"
 )
 
 var (
@@ -81,7 +82,7 @@ func initConfig() error {
 		// Find home directory
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
+			return errors.Wrap(err, "failed to get home directory")
 		}
 
 		// Search for config in home directory

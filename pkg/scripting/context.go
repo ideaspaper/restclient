@@ -10,14 +10,14 @@ import (
 type ScriptContext struct {
 	Request    *models.HttpRequest
 	Response   *models.HttpResponse
-	GlobalVars map[string]interface{}
+	GlobalVars map[string]any
 	EnvVars    map[string]string
 }
 
 // NewScriptContext creates a new script context
 func NewScriptContext() *ScriptContext {
 	return &ScriptContext{
-		GlobalVars: make(map[string]interface{}),
+		GlobalVars: make(map[string]any),
 		EnvVars:    make(map[string]string),
 	}
 }
@@ -33,15 +33,15 @@ func (c *ScriptContext) SetResponse(resp *models.HttpResponse) {
 }
 
 // SetGlobalVar sets a global variable
-func (c *ScriptContext) SetGlobalVar(name string, value interface{}) {
+func (c *ScriptContext) SetGlobalVar(name string, value any) {
 	if c.GlobalVars == nil {
-		c.GlobalVars = make(map[string]interface{})
+		c.GlobalVars = make(map[string]any)
 	}
 	c.GlobalVars[name] = value
 }
 
 // GetGlobalVar gets a global variable
-func (c *ScriptContext) GetGlobalVar(name string) interface{} {
+func (c *ScriptContext) GetGlobalVar(name string) any {
 	if c.GlobalVars == nil {
 		return nil
 	}
@@ -65,9 +65,9 @@ func (c *ScriptContext) GetEnvVar(name string) string {
 }
 
 // MergeGlobalVars merges the given global vars into the context
-func (c *ScriptContext) MergeGlobalVars(vars map[string]interface{}) {
+func (c *ScriptContext) MergeGlobalVars(vars map[string]any) {
 	if c.GlobalVars == nil {
-		c.GlobalVars = make(map[string]interface{})
+		c.GlobalVars = make(map[string]any)
 	}
 	for k, v := range vars {
 		c.GlobalVars[k] = v
