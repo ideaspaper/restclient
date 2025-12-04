@@ -350,7 +350,7 @@ func promptHandler(name, description string, isPassword bool) (string, error) {
 
 	if isPassword {
 		// Read password without echo
-		bytePassword, err := term.ReadPassword(syscall.Stdin)
+		bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Println() // New line after password input
 		if err != nil {
 			return "", err
