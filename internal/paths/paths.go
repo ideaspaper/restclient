@@ -53,6 +53,15 @@ func DefaultSessionDir() (string, error) {
 	return AppDataDir("session")
 }
 
+// DefaultLastFilePath returns the path to the file storing the last used .http/.rest file path.
+func DefaultLastFilePath() (string, error) {
+	dir, err := AppDataDir("")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "lastfile"), nil
+}
+
 // Exists returns true if the path exists (file or directory).
 func Exists(path string) bool {
 	return filesystem.Exists(path)

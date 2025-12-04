@@ -18,6 +18,7 @@ import (
 	"github.com/ideaspaper/restclient/pkg/config"
 	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/executor"
+	"github.com/ideaspaper/restclient/pkg/lastfile"
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/parser"
 	"github.com/ideaspaper/restclient/pkg/tui"
@@ -70,16 +71,22 @@ var (
 
 // sendCmd represents the send command
 var sendCmd = &cobra.Command{
-	Use:   "send <file.http|file.rest> [flags]",
+	Use:   "send [file.http|file.rest] [flags]",
 	Short: "Send HTTP request from a .http or .rest file",
 	Long: `Send an HTTP request defined in a .http or .rest file.
 
 The file can contain one or multiple requests separated by ###.
 You can select a specific request by name (using @name) or by index.
 
+If no file is specified, the last used file will be used automatically.
+The last file path is stored in ~/.restclient/lastfile.
+
 Examples:
   # Send the first request in the file
   restclient send api.http
+
+  # Send from the last used file
+  restclient send
 
   # Send a request by name
   restclient send api.http --name getUsers
@@ -95,7 +102,7 @@ Examples:
 
   # Save response to file
   restclient send api.http --output response.json`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runSend,
 }
 
@@ -116,7 +123,24 @@ func init() {
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
-	filePath := args[0]
+	var filePath string
+
+	if len(args) == 0 {
+		// No file provided, try to load the last used file
+		lastPath, err := lastfile.Load()
+		if err != nil {
+			return err
+		}
+		if lastPath == "" {
+			return cmd.Help()
+		}
+		filePath = lastPath
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Using last file: %s\n", filePath)
+		}
+	} else {
+		filePath = args[0]
+	}
 
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
@@ -132,6 +156,14 @@ func runSend(cmd *cobra.Command, args []string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return errors.Wrap(err, "failed to read file")
+	}
+
+	// Save the file path as the last used file
+	if saveErr := lastfile.Save(filePath); saveErr != nil {
+		// Log warning but don't fail the request
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save last file path: %v\n", saveErr)
+		}
 	}
 
 	fileVarsResult := variables.ParseFileVariablesWithDuplicates(string(content))

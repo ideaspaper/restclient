@@ -87,6 +87,9 @@ go mod download
 # Send a request from a .http file
 restclient send api.http
 
+# Re-send from the last used file
+restclient send
+
 # Send with a specific environment
 restclient send api.http -e production
 ```
@@ -125,8 +128,10 @@ Send HTTP requests from `.http` or `.rest` files.
 
 When the file contains multiple requests and no `--name` or `--index` flag is provided, an interactive fuzzy-search selector is displayed.
 
+**Last File Memory:** If no file is specified, restclient automatically uses the last opened file. The last file path is stored in `~/.restclient/lastfile`.
+
 ```bash
-restclient send <file.http> [flags]
+restclient send [file.http] [flags]
 ```
 
 **Flags:**
@@ -149,6 +154,9 @@ restclient send <file.http> [flags]
 ```bash
 # Send first request in file
 restclient send api.http
+
+# Re-send from the last used file
+restclient send
 
 # Interactive selection (when file has multiple requests)
 restclient send api.http

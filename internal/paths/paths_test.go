@@ -114,6 +114,23 @@ func TestDefaultSessionDir(t *testing.T) {
 	}
 }
 
+func TestDefaultLastFilePath(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("Cannot get home directory")
+	}
+
+	got, err := DefaultLastFilePath()
+	if err != nil {
+		t.Fatalf("DefaultLastFilePath() error = %v", err)
+	}
+
+	expected := filepath.Join(homeDir, AppDirName, "lastfile")
+	if got != expected {
+		t.Errorf("DefaultLastFilePath() = %q, want %q", got, expected)
+	}
+}
+
 func TestExists(t *testing.T) {
 	// Test with existing file
 	tmpFile, err := os.CreateTemp("", "test")
