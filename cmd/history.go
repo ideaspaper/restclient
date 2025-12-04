@@ -57,9 +57,6 @@ Examples:
   # Clear all history
   restclient history clear
 
-  # Search history
-  restclient history search "api.example.com"
-
   # Show history statistics
   restclient history stats
 
@@ -95,14 +92,6 @@ var historyClearCmd = &cobra.Command{
 	RunE:  runHistoryClear,
 }
 
-// historySearchCmd searches history
-var historySearchCmd = &cobra.Command{
-	Use:   "search <query>",
-	Short: "Search request history",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runHistorySearch,
-}
-
 // historyStatsCmd shows history statistics
 var historyStatsCmd = &cobra.Command{
 	Use:   "stats",
@@ -133,7 +122,6 @@ func init() {
 
 	historyCmd.AddCommand(historyShowCmd)
 	historyCmd.AddCommand(historyClearCmd)
-	historyCmd.AddCommand(historySearchCmd)
 	historyCmd.AddCommand(historyStatsCmd)
 	historyCmd.AddCommand(historyReplayCmd)
 }
@@ -196,30 +184,6 @@ func runHistoryClear(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("History cleared")
-	return nil
-}
-
-func runHistorySearch(cmd *cobra.Command, args []string) error {
-	query := args[0]
-
-	histMgr, err := history.NewHistoryManager("")
-	if err != nil {
-		return errors.Wrap(err, "failed to load history")
-	}
-
-	items := histMgr.Search(query)
-
-	if len(items) == 0 {
-		fmt.Printf("No requests matching '%s' found\n", query)
-		return nil
-	}
-
-	fmt.Printf("Found %d matching requests:\n\n", len(items))
-
-	for i, item := range items {
-		printHistoryItem(item, i)
-	}
-
 	return nil
 }
 
@@ -298,6 +262,8 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 
 	// History already contains the Cookie header that was sent, no session needed
 	noSession = true
+
+	fmt.Printf("%s %s\n\n", printMethod(request.Method), request.URL)
 
 	return sendRequest("", request, cfg, varProcessor)
 }

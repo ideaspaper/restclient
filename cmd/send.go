@@ -355,6 +355,8 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return printDryRun(filePath, request, cfg)
 	}
 
+	fmt.Printf("%s %s\n\n", printMethod(request.Method), request.URL)
+
 	return sendRequest(filePath, request, cfg, varProcessor)
 }
 

@@ -32,7 +32,7 @@ A powerful command-line HTTP client inspired by the [VS Code REST Client](https:
 - Multiple environments with variable support
 - System variables (UUID, timestamps, random values, etc.)
 - File variables and `.env` file support
-- Request history with search and replay
+- Request history with replay
 - Multipart form data and file uploads
 - GraphQL support (queries, mutations, subscriptions)
 - Basic, Digest, and AWS Signature v4 authentication
@@ -230,7 +230,6 @@ restclient history <subcommand> [args]
 | Command | Description |
 |---------|-------------|
 | `show [index]` | Show details of a specific request, or interactive selection if no index |
-| `search <query>` | Search request history |
 | `replay [index]` | Replay a request exactly as it was sent, or interactive selection if no index |
 | `stats` | Show history statistics |
 | `clear` | Clear all history |
@@ -243,9 +242,6 @@ restclient history show
 
 # Show request at index 1
 restclient history show 1
-
-# Search history
-restclient history search "api.example.com"
 
 # Interactive selection to replay a request
 restclient history replay

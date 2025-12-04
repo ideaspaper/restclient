@@ -188,48 +188,6 @@ func TestHistoryManager_GetByIndex(t *testing.T) {
 	}
 }
 
-func TestHistoryManager_Search(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "restclient-history-test")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	hm, err := NewHistoryManager(tmpDir)
-	if err != nil {
-		t.Fatalf("NewHistoryManager failed: %v", err)
-	}
-
-	hm.Add(&models.HttpRequest{Method: "GET", URL: "https://api.example.com/users"})
-	hm.Add(&models.HttpRequest{Method: "POST", URL: "https://api.example.com/users"})
-	hm.Add(&models.HttpRequest{Method: "GET", URL: "https://api.example.com/orders"})
-	hm.Add(&models.HttpRequest{Method: "DELETE", URL: "https://other.com/resource"})
-
-	// Search by URL
-	results := hm.Search("users")
-	if len(results) != 2 {
-		t.Errorf("Expected 2 results for 'users', got %d", len(results))
-	}
-
-	// Search by method
-	results = hm.Search("GET")
-	if len(results) != 2 {
-		t.Errorf("Expected 2 results for 'GET', got %d", len(results))
-	}
-
-	// Search case-insensitive
-	results = hm.Search("delete")
-	if len(results) != 1 {
-		t.Errorf("Expected 1 result for 'delete', got %d", len(results))
-	}
-
-	// Search with no results
-	results = hm.Search("nonexistent")
-	if len(results) != 0 {
-		t.Errorf("Expected 0 results for 'nonexistent', got %d", len(results))
-	}
-}
-
 func TestHistoryManager_Clear(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "restclient-history-test")
 	if err != nil {
@@ -386,13 +344,13 @@ func TestFormatHistoryItem(t *testing.T) {
 	}
 
 	// Should contain 1-based index, method, URL
-	if !containsIgnoreCase(formatted, "[6]") {
+	if !strings.Contains(formatted, "[6]") {
 		t.Error("Should contain 1-based index [6]")
 	}
-	if !containsIgnoreCase(formatted, "GET") {
+	if !strings.Contains(formatted, "GET") {
 		t.Error("Should contain method GET")
 	}
-	if !containsIgnoreCase(formatted, "example.com") {
+	if !strings.Contains(formatted, "example.com") {
 		t.Error("Should contain part of URL")
 	}
 }

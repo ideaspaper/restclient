@@ -117,17 +117,6 @@ func (h *HistoryManager) GetByIndex(index int) (*models.HistoricalHttpRequest, e
 	return &h.items[index], nil
 }
 
-// Search searches history by URL or method
-func (h *HistoryManager) Search(query string) []models.HistoricalHttpRequest {
-	var results []models.HistoricalHttpRequest
-	for _, item := range h.items {
-		if containsIgnoreCase(item.URL, query) || containsIgnoreCase(item.Method, query) {
-			results = append(results, item)
-		}
-	}
-	return results
-}
-
 // Clear clears all history
 func (h *HistoryManager) Clear() error {
 	h.items = make([]models.HistoricalHttpRequest, 0)
@@ -183,11 +172,6 @@ func FormatHistoryItem(item models.HistoricalHttpRequest, index int) string {
 // truncateURL truncates a URL to max length
 func truncateURL(url string, maxLen int) string {
 	return stringutil.Truncate(url, maxLen)
-}
-
-// containsIgnoreCase checks if s contains substr (case-insensitive)
-func containsIgnoreCase(s, substr string) bool {
-	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
 // extractDomain extracts domain from URL
