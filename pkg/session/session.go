@@ -1,3 +1,6 @@
+// Package session provides session management for persisting cookies and
+// variables across HTTP requests, supporting both directory-scoped and
+// named session modes.
 package session
 
 import (
@@ -83,7 +86,7 @@ func NewSessionManagerWithFS(fs filesystem.FileSystem, baseDir, httpFilePath, se
 		sessionPath = filepath.Join(baseDir, sessionDirName, namedSessionDir, "default")
 	}
 
-	sm := &SessionManager{
+	s := &SessionManager{
 		fs:          fs,
 		baseDir:     baseDir,
 		sessionPath: sessionPath,
@@ -91,7 +94,7 @@ func NewSessionManagerWithFS(fs filesystem.FileSystem, baseDir, httpFilePath, se
 		variables:   make(map[string]any),
 	}
 
-	return sm, nil
+	return s, nil
 }
 
 // hashPath creates a short hash of a path for directory naming
@@ -101,90 +104,90 @@ func hashPath(path string) string {
 }
 
 // Load loads both cookies and variables from disk
-func (sm *SessionManager) Load() error {
-	if err := sm.LoadCookies(); err != nil && !os.IsNotExist(err) {
+func (s *SessionManager) Load() error {
+	if err := s.LoadCookies(); err != nil && !os.IsNotExist(err) {
 		return errors.Wrap(err, "failed to load cookies")
 	}
-	if err := sm.LoadVariables(); err != nil && !os.IsNotExist(err) {
+	if err := s.LoadVariables(); err != nil && !os.IsNotExist(err) {
 		return errors.Wrap(err, "failed to load variables")
 	}
 	return nil
 }
 
 // Save saves both cookies and variables to disk
-func (sm *SessionManager) Save() error {
-	if err := sm.SaveCookies(); err != nil {
+func (s *SessionManager) Save() error {
+	if err := s.SaveCookies(); err != nil {
 		return errors.Wrap(err, "failed to save cookies")
 	}
-	if err := sm.SaveVariables(); err != nil {
+	if err := s.SaveVariables(); err != nil {
 		return errors.Wrap(err, "failed to save variables")
 	}
 	return nil
 }
 
 // LoadCookies loads cookies from disk
-func (sm *SessionManager) LoadCookies() error {
-	path := filepath.Join(sm.sessionPath, cookiesFileName)
-	data, err := sm.fs.ReadFile(path)
+func (s *SessionManager) LoadCookies() error {
+	path := filepath.Join(s.sessionPath, cookiesFileName)
+	data, err := s.fs.ReadFile(path)
 	if err != nil {
 		return errors.Wrap(err, "failed to read cookies file")
 	}
 
-	if err := json.Unmarshal(data, &sm.cookies); err != nil {
+	if err := json.Unmarshal(data, &s.cookies); err != nil {
 		return errors.Wrap(err, "failed to parse cookies file")
 	}
 	return nil
 }
 
 // SaveCookies saves cookies to disk
-func (sm *SessionManager) SaveCookies() error {
-	if err := sm.fs.MkdirAll(sm.sessionPath, 0755); err != nil {
+func (s *SessionManager) SaveCookies() error {
+	if err := s.fs.MkdirAll(s.sessionPath, 0755); err != nil {
 		return errors.Wrap(err, "failed to create session directory")
 	}
 
 	// Clean expired cookies before saving
-	sm.cleanExpiredCookies()
+	s.cleanExpiredCookies()
 
-	data, err := json.MarshalIndent(sm.cookies, "", "  ")
+	data, err := json.MarshalIndent(s.cookies, "", "  ")
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal cookies")
 	}
 
-	path := filepath.Join(sm.sessionPath, cookiesFileName)
-	return sm.fs.WriteFile(path, data, 0644)
+	path := filepath.Join(s.sessionPath, cookiesFileName)
+	return s.fs.WriteFile(path, data, 0644)
 }
 
 // LoadVariables loads variables from disk
-func (sm *SessionManager) LoadVariables() error {
-	path := filepath.Join(sm.sessionPath, varsFileName)
-	data, err := sm.fs.ReadFile(path)
+func (s *SessionManager) LoadVariables() error {
+	path := filepath.Join(s.sessionPath, varsFileName)
+	data, err := s.fs.ReadFile(path)
 	if err != nil {
 		return errors.Wrap(err, "failed to read variables file")
 	}
 
-	if err := json.Unmarshal(data, &sm.variables); err != nil {
+	if err := json.Unmarshal(data, &s.variables); err != nil {
 		return errors.Wrap(err, "failed to parse variables file")
 	}
 	return nil
 }
 
 // SaveVariables saves variables to disk
-func (sm *SessionManager) SaveVariables() error {
-	if err := sm.fs.MkdirAll(sm.sessionPath, 0755); err != nil {
+func (s *SessionManager) SaveVariables() error {
+	if err := s.fs.MkdirAll(s.sessionPath, 0755); err != nil {
 		return errors.Wrap(err, "failed to create session directory")
 	}
 
-	data, err := json.MarshalIndent(sm.variables, "", "  ")
+	data, err := json.MarshalIndent(s.variables, "", "  ")
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal variables")
 	}
 
-	path := filepath.Join(sm.sessionPath, varsFileName)
-	return sm.fs.WriteFile(path, data, 0644)
+	path := filepath.Join(s.sessionPath, varsFileName)
+	return s.fs.WriteFile(path, data, 0644)
 }
 
 // GetCookiesForURL returns cookies for a given URL
-func (sm *SessionManager) GetCookiesForURL(urlStr string) []*http.Cookie {
+func (s *SessionManager) GetCookiesForURL(urlStr string) []*http.Cookie {
 	parsedURL, err := url.Parse(urlStr)
 	if err != nil {
 		return nil
@@ -195,7 +198,7 @@ func (sm *SessionManager) GetCookiesForURL(urlStr string) []*http.Cookie {
 		host = h
 	}
 
-	storedCookies, ok := sm.cookies[host]
+	storedCookies, ok := s.cookies[host]
 	if !ok {
 		return nil
 	}
@@ -236,7 +239,7 @@ func (sm *SessionManager) GetCookiesForURL(urlStr string) []*http.Cookie {
 }
 
 // SetCookiesFromResponse stores cookies from an HTTP response
-func (sm *SessionManager) SetCookiesFromResponse(urlStr string, cookies []*http.Cookie) {
+func (s *SessionManager) SetCookiesFromResponse(urlStr string, cookies []*http.Cookie) {
 	if len(cookies) == 0 {
 		return
 	}
@@ -251,7 +254,7 @@ func (sm *SessionManager) SetCookiesFromResponse(urlStr string, cookies []*http.
 		host = h
 	}
 
-	existing := sm.cookies[host]
+	existing := s.cookies[host]
 	cookieMap := make(map[string]Cookie)
 	for _, c := range existing {
 		cookieMap[c.Name] = c
@@ -286,18 +289,18 @@ func (sm *SessionManager) SetCookiesFromResponse(urlStr string, cookies []*http.
 		updatedCookies = append(updatedCookies, c)
 	}
 
-	sm.cookies[host] = updatedCookies
+	s.cookies[host] = updatedCookies
 }
 
 // GetVariable gets a session variable
-func (sm *SessionManager) GetVariable(name string) (any, bool) {
-	val, ok := sm.variables[name]
+func (s *SessionManager) GetVariable(name string) (any, bool) {
+	val, ok := s.variables[name]
 	return val, ok
 }
 
 // GetVariableAsString gets a session variable as string
-func (sm *SessionManager) GetVariableAsString(name string) (string, bool) {
-	val, ok := sm.variables[name]
+func (s *SessionManager) GetVariableAsString(name string) (string, bool) {
+	val, ok := s.variables[name]
 	if !ok {
 		return "", false
 	}
@@ -316,45 +319,45 @@ func (sm *SessionManager) GetVariableAsString(name string) (string, bool) {
 }
 
 // SetVariable sets a session variable
-func (sm *SessionManager) SetVariable(name string, value any) {
-	sm.variables[name] = value
+func (s *SessionManager) SetVariable(name string, value any) {
+	s.variables[name] = value
 }
 
 // GetAllVariables returns all session variables
-func (sm *SessionManager) GetAllVariables() map[string]any {
-	return sm.variables
+func (s *SessionManager) GetAllVariables() map[string]any {
+	return s.variables
 }
 
 // GetAllCookies returns all cookies
-func (sm *SessionManager) GetAllCookies() map[string][]Cookie {
-	return sm.cookies
+func (s *SessionManager) GetAllCookies() map[string][]Cookie {
+	return s.cookies
 }
 
 // ClearCookies clears all cookies
-func (sm *SessionManager) ClearCookies() {
-	sm.cookies = make(map[string][]Cookie)
+func (s *SessionManager) ClearCookies() {
+	s.cookies = make(map[string][]Cookie)
 }
 
 // ClearVariables clears all variables
-func (sm *SessionManager) ClearVariables() {
-	sm.variables = make(map[string]any)
+func (s *SessionManager) ClearVariables() {
+	s.variables = make(map[string]any)
 }
 
 // ClearAll clears both cookies and variables
-func (sm *SessionManager) ClearAll() {
-	sm.ClearCookies()
-	sm.ClearVariables()
+func (s *SessionManager) ClearAll() {
+	s.ClearCookies()
+	s.ClearVariables()
 }
 
 // Delete removes the session directory from disk
-func (sm *SessionManager) Delete() error {
-	return sm.fs.RemoveAll(sm.sessionPath)
+func (s *SessionManager) Delete() error {
+	return s.fs.RemoveAll(s.sessionPath)
 }
 
 // cleanExpiredCookies removes expired cookies from memory
-func (sm *SessionManager) cleanExpiredCookies() {
+func (s *SessionManager) cleanExpiredCookies() {
 	now := time.Now()
-	for host, cookies := range sm.cookies {
+	for host, cookies := range s.cookies {
 		var validCookies []Cookie
 		for _, c := range cookies {
 			if c.Expires.IsZero() || c.Expires.After(now) {
@@ -362,9 +365,9 @@ func (sm *SessionManager) cleanExpiredCookies() {
 			}
 		}
 		if len(validCookies) > 0 {
-			sm.cookies[host] = validCookies
+			s.cookies[host] = validCookies
 		} else {
-			delete(sm.cookies, host)
+			delete(s.cookies, host)
 		}
 	}
 }
@@ -384,8 +387,8 @@ func splitHostPort(hostport string) (host, port string, err error) {
 }
 
 // GetSessionPath returns the session path (for display purposes)
-func (sm *SessionManager) GetSessionPath() string {
-	return sm.sessionPath
+func (s *SessionManager) GetSessionPath() string {
+	return s.sessionPath
 }
 
 // ListAllSessions returns all session directories
@@ -406,7 +409,7 @@ func ListAllSessionsWithFS(fs filesystem.FileSystem, baseDir string) ([]string, 
 	var sessions []string
 
 	namedPath := filepath.Join(baseDir, sessionDirName, namedSessionDir)
-	if entries, err := os.ReadDir(namedPath); err == nil {
+	if entries, err := fs.ReadDir(namedPath); err == nil {
 		for _, entry := range entries {
 			if entry.IsDir() {
 				sessions = append(sessions, "named:"+entry.Name())
@@ -415,7 +418,7 @@ func ListAllSessionsWithFS(fs filesystem.FileSystem, baseDir string) ([]string, 
 	}
 
 	dirsPath := filepath.Join(baseDir, sessionDirName, dirSessionsDir)
-	if entries, err := os.ReadDir(dirsPath); err == nil {
+	if entries, err := fs.ReadDir(dirsPath); err == nil {
 		for _, entry := range entries {
 			if entry.IsDir() {
 				sessions = append(sessions, "dir:"+entry.Name())

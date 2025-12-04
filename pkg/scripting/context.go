@@ -2,6 +2,7 @@ package scripting
 
 import (
 	"fmt"
+	"maps"
 
 	"github.com/ideaspaper/restclient/pkg/models"
 )
@@ -69,9 +70,7 @@ func (c *ScriptContext) MergeGlobalVars(vars map[string]any) {
 	if c.GlobalVars == nil {
 		c.GlobalVars = make(map[string]any)
 	}
-	for k, v := range vars {
-		c.GlobalVars[k] = v
-	}
+	maps.Copy(c.GlobalVars, vars)
 }
 
 // GetGlobalVarAsString gets a global variable as a string

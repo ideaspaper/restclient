@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ideaspaper/restclient/internal/httputil"
 	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/models"
 )
@@ -50,13 +51,7 @@ type DigestChallenge struct {
 // ProcessAuth processes authentication headers in the request
 // It returns nil if no auth processing is needed or on success.
 func (p *Processor) ProcessAuth(request *models.HttpRequest) error {
-	authHeader := ""
-	for k, v := range request.Headers {
-		if strings.EqualFold(k, "authorization") {
-			authHeader = v
-			break
-		}
-	}
+	authHeader, _ := httputil.GetHeader(request.Headers, "authorization")
 
 	if authHeader == "" {
 		return nil
@@ -149,12 +144,12 @@ func (p *Processor) processAWSAuth(request *models.HttpRequest, args []string) e
 	// Parse optional parameters
 	var sessionToken, region, service string
 	for _, arg := range args[2:] {
-		if strings.HasPrefix(arg, "token:") {
-			sessionToken = strings.TrimPrefix(arg, "token:")
-		} else if strings.HasPrefix(arg, "region:") {
-			region = strings.TrimPrefix(arg, "region:")
-		} else if strings.HasPrefix(arg, "service:") {
-			service = strings.TrimPrefix(arg, "service:")
+		if after, found := strings.CutPrefix(arg, "token:"); found {
+			sessionToken = after
+		} else if after, found := strings.CutPrefix(arg, "region:"); found {
+			region = after
+		} else if after, found := strings.CutPrefix(arg, "service:"); found {
+			service = after
 		}
 	}
 
@@ -374,23 +369,12 @@ func (s *AWSSigner) Sign(request *models.HttpRequest) error {
 
 // UpdateAuthHeader updates or sets the Authorization header
 func UpdateAuthHeader(request *models.HttpRequest, value string) {
-	for k := range request.Headers {
-		if strings.EqualFold(k, "authorization") {
-			request.Headers[k] = value
-			return
-		}
-	}
-	request.Headers["Authorization"] = value
+	httputil.SetHeader(request.Headers, "Authorization", value)
 }
 
 // DeleteAuthHeader removes the Authorization header
 func DeleteAuthHeader(request *models.HttpRequest) {
-	for k := range request.Headers {
-		if strings.EqualFold(k, "authorization") {
-			delete(request.Headers, k)
-			return
-		}
-	}
+	httputil.DeleteHeader(request.Headers, "authorization")
 }
 
 // GenerateNonce generates a random nonce for auth purposes

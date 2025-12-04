@@ -1,0 +1,43 @@
+# golangci-lint v2 configuration for restclient CLI
+# Run: make lint
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    # Security & correctness
+    - bodyclose     # Check HTTP response body is closed
+    - gosec         # Security checks
+
+    # Code quality
+    - gocyclo       # Check cyclomatic complexity
+    - misspell      # Find misspelled words
+    - nakedret      # Find naked returns in large functions
+    - unconvert     # Remove unnecessary conversions
+
+  settings:
+    gocyclo:
+      min-complexity: 25  # Slightly relaxed for CLI commands
+
+    nakedret:
+      max-func-lines: 30
+
+    gosec:
+      excludes:
+        - G104  # Audit errors not checked (too noisy for CLI)
+        - G304  # File path from variable (intentional for file-based CLI)
+        - G306  # Poor file permissions (CLI creates user files)
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  # Don't limit issues per linter
+  max-issues-per-linter: 0
+  max-same-issues: 0

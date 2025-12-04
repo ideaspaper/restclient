@@ -1,3 +1,5 @@
+// Package history provides request history management with persistence,
+// filtering, and display formatting capabilities.
 package history
 
 import (
@@ -54,19 +56,19 @@ func NewHistoryManagerWithFS(fs filesystem.FileSystem, dataDir string) (*History
 		return nil, errors.Wrap(err, "failed to create data directory")
 	}
 
-	hm := &HistoryManager{
+	h := &HistoryManager{
 		fs:          fs,
 		historyPath: filepath.Join(dataDir, historyFileName),
 		items:       make([]models.HistoricalHttpRequest, 0),
 	}
 
-	if err := hm.load(); err != nil {
+	if err := h.load(); err != nil {
 		if !isNotExist(err) {
 			return nil, errors.Wrap(err, "failed to load history")
 		}
 	}
 
-	return hm, nil
+	return h, nil
 }
 
 // isNotExist checks if the error indicates a file does not exist.
@@ -76,7 +78,7 @@ func isNotExist(err error) bool {
 }
 
 // Add adds a request to history
-func (hm *HistoryManager) Add(request *models.HttpRequest) error {
+func (h *HistoryManager) Add(request *models.HttpRequest) error {
 	item := models.HistoricalHttpRequest{
 		Method:    request.Method,
 		URL:       request.URL,
@@ -85,40 +87,40 @@ func (hm *HistoryManager) Add(request *models.HttpRequest) error {
 		StartTime: time.Now().UnixMilli(),
 	}
 
-	hm.items = append([]models.HistoricalHttpRequest{item}, hm.items...)
+	h.items = append([]models.HistoricalHttpRequest{item}, h.items...)
 
-	if len(hm.items) > maxHistoryItems {
-		hm.items = hm.items[:maxHistoryItems]
+	if len(h.items) > maxHistoryItems {
+		h.items = h.items[:maxHistoryItems]
 	}
 
-	return hm.save()
+	return h.save()
 }
 
 // GetAll returns all history items
-func (hm *HistoryManager) GetAll() []models.HistoricalHttpRequest {
-	return hm.items
+func (h *HistoryManager) GetAll() []models.HistoricalHttpRequest {
+	return h.items
 }
 
 // GetRecent returns the most recent n items
-func (hm *HistoryManager) GetRecent(n int) []models.HistoricalHttpRequest {
-	if n <= 0 || n > len(hm.items) {
-		return hm.items
+func (h *HistoryManager) GetRecent(n int) []models.HistoricalHttpRequest {
+	if n <= 0 || n > len(h.items) {
+		return h.items
 	}
-	return hm.items[:n]
+	return h.items[:n]
 }
 
 // GetByIndex returns a history item by index (0-based internally, but error message shows 1-based for user)
-func (hm *HistoryManager) GetByIndex(index int) (*models.HistoricalHttpRequest, error) {
-	if index < 0 || index >= len(hm.items) {
-		return nil, errors.NewValidationError("index", fmt.Sprintf("out of range: valid range is 1-%d", len(hm.items)))
+func (h *HistoryManager) GetByIndex(index int) (*models.HistoricalHttpRequest, error) {
+	if index < 0 || index >= len(h.items) {
+		return nil, errors.NewValidationError("index", fmt.Sprintf("out of range: valid range is 1-%d", len(h.items)))
 	}
-	return &hm.items[index], nil
+	return &h.items[index], nil
 }
 
 // Search searches history by URL or method
-func (hm *HistoryManager) Search(query string) []models.HistoricalHttpRequest {
+func (h *HistoryManager) Search(query string) []models.HistoricalHttpRequest {
 	var results []models.HistoricalHttpRequest
-	for _, item := range hm.items {
+	for _, item := range h.items {
 		if containsIgnoreCase(item.URL, query) || containsIgnoreCase(item.Method, query) {
 			results = append(results, item)
 		}
@@ -127,24 +129,24 @@ func (hm *HistoryManager) Search(query string) []models.HistoricalHttpRequest {
 }
 
 // Clear clears all history
-func (hm *HistoryManager) Clear() error {
-	hm.items = make([]models.HistoricalHttpRequest, 0)
-	return hm.save()
+func (h *HistoryManager) Clear() error {
+	h.items = make([]models.HistoricalHttpRequest, 0)
+	return h.save()
 }
 
 // Remove removes a history item by index
-func (hm *HistoryManager) Remove(index int) error {
-	if index < 0 || index >= len(hm.items) {
+func (h *HistoryManager) Remove(index int) error {
+	if index < 0 || index >= len(h.items) {
 		return errors.NewValidationError("index", fmt.Sprintf("out of range: %d", index))
 	}
 
-	hm.items = slices.Delete(hm.items, index, index+1)
-	return hm.save()
+	h.items = slices.Delete(h.items, index, index+1)
+	return h.save()
 }
 
 // load loads history from file
-func (hm *HistoryManager) load() error {
-	data, err := hm.fs.ReadFile(hm.historyPath)
+func (h *HistoryManager) load() error {
+	data, err := h.fs.ReadFile(h.historyPath)
 	if err != nil {
 		if isNotExist(err) {
 			return err
@@ -152,20 +154,20 @@ func (hm *HistoryManager) load() error {
 		return errors.Wrap(err, "failed to read history file")
 	}
 
-	if err := json.Unmarshal(data, &hm.items); err != nil {
+	if err := json.Unmarshal(data, &h.items); err != nil {
 		return errors.Wrap(err, "failed to parse history file")
 	}
 	return nil
 }
 
 // save saves history to file
-func (hm *HistoryManager) save() error {
-	data, err := json.MarshalIndent(hm.items, "", "  ")
+func (h *HistoryManager) save() error {
+	data, err := json.MarshalIndent(h.items, "", "  ")
 	if err != nil {
 		return errors.Wrap(err, "failed to marshal history")
 	}
 
-	return hm.fs.WriteFile(hm.historyPath, data, 0644)
+	return h.fs.WriteFile(h.historyPath, data, 0644)
 }
 
 // FormatHistoryItem formats a history item for display (1-based index for users)
@@ -217,14 +219,14 @@ type HistoryStats struct {
 }
 
 // GetStats returns statistics about the history
-func (hm *HistoryManager) GetStats() HistoryStats {
+func (h *HistoryManager) GetStats() HistoryStats {
 	stats := HistoryStats{
-		TotalRequests: len(hm.items),
+		TotalRequests: len(h.items),
 		MethodCounts:  make(map[string]int),
 		DomainCounts:  make(map[string]int),
 	}
 
-	for _, item := range hm.items {
+	for _, item := range h.items {
 		stats.MethodCounts[item.Method]++
 
 		domain := extractDomain(item.URL)

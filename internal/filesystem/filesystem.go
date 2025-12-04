@@ -22,6 +22,9 @@ type FileSystem interface {
 	Remove(name string) error
 	RemoveAll(path string) error
 
+	// Directory operations
+	ReadDir(name string) ([]fs.DirEntry, error)
+
 	// Path operations
 	UserHomeDir() (string, error)
 }
@@ -70,6 +73,11 @@ func (OSFileSystem) RemoveAll(path string) error {
 // UserHomeDir returns the current user's home directory.
 func (OSFileSystem) UserHomeDir() (string, error) {
 	return os.UserHomeDir()
+}
+
+// ReadDir reads the named directory and returns all its directory entries.
+func (OSFileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
+	return os.ReadDir(name)
 }
 
 // Helper functions that use the Default file system

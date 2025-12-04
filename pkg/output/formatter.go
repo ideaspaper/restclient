@@ -1,3 +1,5 @@
+// Package output provides response formatting with syntax highlighting
+// and colorization for HTTP responses, JSON, and XML content.
 package output
 
 import (

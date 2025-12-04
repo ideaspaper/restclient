@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -250,8 +252,31 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	// Execute pre-request script before variable processing so scripts can set variables
 	if request.Metadata.PreScript != "" {
-		result, err := executor.ExecutePreScript(request.Metadata.PreScript, cfg, request, varProcessor)
+		// Create context with cancellation support for interrupt signals
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Handle interrupt signal (Ctrl+C)
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigChan
+			if verbose {
+				fmt.Fprintln(os.Stderr, "\nInterrupt received, cancelling pre-script...")
+			}
+			cancel()
+		}()
+
+		result, err := executor.ExecutePreScriptWithContext(ctx, request.Metadata.PreScript, cfg, request, varProcessor)
+
+		// Clean up signal handling
+		signal.Stop(sigChan)
+		cancel()
+
 		if err != nil {
+			// Check for context cancellation
+			if ctx.Err() == context.Canceled {
+				return errors.Wrap(errors.ErrCanceled, "pre-script cancelled")
+			}
 			return err
 		}
 
@@ -325,7 +350,7 @@ func promptHandler(name, description string, isPassword bool) (string, error) {
 
 	if isPassword {
 		// Read password without echo
-		bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+		bytePassword, err := term.ReadPassword(syscall.Stdin)
 		fmt.Println() // New line after password input
 		if err != nil {
 			return "", err

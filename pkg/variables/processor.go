@@ -1,3 +1,6 @@
+// Package variables provides variable resolution and substitution for HTTP
+// request templates, supporting environment variables, system functions,
+// file variables, and user prompts.
 package variables
 
 import (
@@ -14,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ideaspaper/restclient/internal/httputil"
 	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/spf13/viper"
 )
@@ -68,40 +72,39 @@ func NewVariableProcessor() *VariableProcessor {
 }
 
 // SetEnvironment sets the current environment
-func (vp *VariableProcessor) SetEnvironment(env string) {
-	vp.environment = env
+func (v *VariableProcessor) SetEnvironment(env string) {
+	v.environment = env
 }
 
 // SetEnvironmentVariables sets environment variables from config
-func (vp *VariableProcessor) SetEnvironmentVariables(vars map[string]map[string]string) {
-	vp.envVariables = vars
+func (v *VariableProcessor) SetEnvironmentVariables(vars map[string]map[string]string) {
+	v.envVariables = vars
 }
 
 // SetFileVariables merges file variables into existing ones
-func (vp *VariableProcessor) SetFileVariables(vars map[string]string) {
-	maps.Copy(vp.fileVariables, vars)
+func (v *VariableProcessor) SetFileVariables(vars map[string]string) {
+	maps.Copy(v.fileVariables, vars)
 }
 
 // SetRequestResult stores a request result for request variables
-func (vp *VariableProcessor) SetRequestResult(name string, result RequestResult) {
-	vp.requestResults[name] = result
+func (v *VariableProcessor) SetRequestResult(name string, result RequestResult) {
+	v.requestResults[name] = result
 }
 
 // SetPromptHandler sets the handler for prompt variables
-func (vp *VariableProcessor) SetPromptHandler(handler func(name, description string, isPassword bool) (string, error)) {
-	vp.promptHandler = handler
+func (v *VariableProcessor) SetPromptHandler(handler func(name, description string, isPassword bool) (string, error)) {
+	v.promptHandler = handler
 }
 
 // SetCurrentDir sets the current directory for dotenv resolution
-func (vp *VariableProcessor) SetCurrentDir(dir string) {
-	vp.currentDir = dir
+func (v *VariableProcessor) SetCurrentDir(dir string) {
+	v.currentDir = dir
 }
 
 // Process processes all variables in the given text
-func (vp *VariableProcessor) Process(text string) (string, error) {
+func (v *VariableProcessor) Process(text string) (string, error) {
 	varRegex := regexp.MustCompile(`\{\{(.+?)\}\}`)
 
-	result := text
 	lastIndex := 0
 	var builder strings.Builder
 
@@ -110,7 +113,7 @@ func (vp *VariableProcessor) Process(text string) (string, error) {
 		builder.WriteString(text[lastIndex:match[0]])
 
 		varName := strings.TrimSpace(text[match[2]:match[3]])
-		value, err := vp.resolveVariable(varName)
+		value, err := v.resolveVariable(varName)
 		if err != nil {
 			// Keep original if cannot resolve
 			builder.WriteString(text[match[0]:match[1]])
@@ -121,15 +124,14 @@ func (vp *VariableProcessor) Process(text string) (string, error) {
 		lastIndex = match[1]
 	}
 	builder.WriteString(text[lastIndex:])
-	result = builder.String()
 
-	return result, nil
+	return builder.String(), nil
 }
 
 // resolveVariable resolves a single variable
-func (vp *VariableProcessor) resolveVariable(name string) (string, error) {
+func (v *VariableProcessor) resolveVariable(name string) (string, error) {
 	// Check cache first
-	if val, ok := vp.resolvedCache[name]; ok {
+	if val, ok := v.resolvedCache[name]; ok {
 		return val, nil
 	}
 
@@ -144,17 +146,17 @@ func (vp *VariableProcessor) resolveVariable(name string) (string, error) {
 
 	// System variables (start with $)
 	if strings.HasPrefix(name, "$") {
-		value, err = vp.resolveSystemVariable(name)
+		value, err = v.resolveSystemVariable(name)
 	} else if strings.Contains(name, ".response.") || strings.Contains(name, ".request.") {
 		// Request variable
-		value, err = vp.resolveRequestVariable(name)
+		value, err = v.resolveRequestVariable(name)
 	} else {
 		// Try file variables, then environment variables
-		if val, ok := vp.fileVariables[name]; ok {
+		if val, ok := v.fileVariables[name]; ok {
 			// Recursively resolve any variables in the file variable value
-			value, _ = vp.Process(val)
+			value, _ = v.Process(val)
 		} else {
-			value, err = vp.resolveEnvironmentVariable(name)
+			value, err = v.resolveEnvironmentVariable(name)
 		}
 	}
 
@@ -168,12 +170,12 @@ func (vp *VariableProcessor) resolveVariable(name string) (string, error) {
 	}
 
 	// Cache the result
-	vp.resolvedCache[name] = value
+	v.resolvedCache[name] = value
 	return value, nil
 }
 
 // resolveSystemVariable resolves system variables like $guid, $timestamp, etc.
-func (vp *VariableProcessor) resolveSystemVariable(name string) (string, error) {
+func (v *VariableProcessor) resolveSystemVariable(name string) (string, error) {
 	parts := strings.Fields(name)
 	if len(parts) == 0 {
 		return "", errors.NewValidationError("system variable", "empty variable name")
@@ -186,25 +188,25 @@ func (vp *VariableProcessor) resolveSystemVariable(name string) (string, error) 
 		return uuid.New().String(), nil
 
 	case "$timestamp":
-		return vp.resolveTimestamp(parts[1:])
+		return v.resolveTimestamp(parts[1:])
 
 	case "$datetime":
-		return vp.resolveDatetime(parts[1:], false)
+		return v.resolveDatetime(parts[1:], false)
 
 	case "$localDatetime":
-		return vp.resolveDatetime(parts[1:], true)
+		return v.resolveDatetime(parts[1:], true)
 
 	case "$randomInt":
-		return vp.resolveRandomInt(parts[1:])
+		return v.resolveRandomInt(parts[1:])
 
 	case "$processEnv":
-		return vp.resolveProcessEnv(parts[1:])
+		return v.resolveProcessEnv(parts[1:])
 
 	case "$dotenv":
-		return vp.resolveDotenv(parts[1:])
+		return v.resolveDotenv(parts[1:])
 
 	case "$prompt":
-		return vp.resolvePrompt(parts[1:])
+		return v.resolvePrompt(parts[1:])
 
 	default:
 		return "", errors.NewValidationErrorWithValue("system variable", varName, "unknown variable")
@@ -212,7 +214,7 @@ func (vp *VariableProcessor) resolveSystemVariable(name string) (string, error) 
 }
 
 // resolveTimestamp resolves $timestamp with optional offset
-func (vp *VariableProcessor) resolveTimestamp(args []string) (string, error) {
+func (v *VariableProcessor) resolveTimestamp(args []string) (string, error) {
 	t := time.Now().UTC()
 
 	if len(args) >= 2 {
@@ -228,7 +230,7 @@ func (vp *VariableProcessor) resolveTimestamp(args []string) (string, error) {
 }
 
 // resolveDatetime resolves $datetime with format and optional offset
-func (vp *VariableProcessor) resolveDatetime(args []string, local bool) (string, error) {
+func (v *VariableProcessor) resolveDatetime(args []string, local bool) (string, error) {
 	if len(args) == 0 {
 		return "", errors.NewValidationError("$datetime", "format argument required")
 	}
@@ -263,7 +265,7 @@ func (vp *VariableProcessor) resolveDatetime(args []string, local bool) (string,
 }
 
 // resolveRandomInt resolves $randomInt min max
-func (vp *VariableProcessor) resolveRandomInt(args []string) (string, error) {
+func (v *VariableProcessor) resolveRandomInt(args []string) (string, error) {
 	if len(args) < 2 {
 		return "", errors.NewValidationError("$randomInt", "requires min and max arguments")
 	}
@@ -293,7 +295,7 @@ func (vp *VariableProcessor) resolveRandomInt(args []string) (string, error) {
 }
 
 // resolveProcessEnv resolves $processEnv varName
-func (vp *VariableProcessor) resolveProcessEnv(args []string) (string, error) {
+func (v *VariableProcessor) resolveProcessEnv(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", errors.NewValidationError("$processEnv", "requires variable name")
 	}
@@ -304,7 +306,7 @@ func (vp *VariableProcessor) resolveProcessEnv(args []string) (string, error) {
 	if strings.HasPrefix(varName, "%") {
 		// Get the environment variable name from config
 		envVarName := varName[1:]
-		if val, err := vp.resolveEnvironmentVariable(envVarName); err == nil {
+		if val, err := v.resolveEnvironmentVariable(envVarName); err == nil {
 			varName = val
 		}
 	}
@@ -313,7 +315,7 @@ func (vp *VariableProcessor) resolveProcessEnv(args []string) (string, error) {
 }
 
 // resolveDotenv resolves $dotenv varName
-func (vp *VariableProcessor) resolveDotenv(args []string) (string, error) {
+func (v *VariableProcessor) resolveDotenv(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", errors.NewValidationError("$dotenv", "requires variable name")
 	}
@@ -323,18 +325,18 @@ func (vp *VariableProcessor) resolveDotenv(args []string) (string, error) {
 	// Check if it's a reference
 	if strings.HasPrefix(varName, "%") {
 		envVarName := varName[1:]
-		if val, err := vp.resolveEnvironmentVariable(envVarName); err == nil {
+		if val, err := v.resolveEnvironmentVariable(envVarName); err == nil {
 			varName = val
 		}
 	}
 
 	// Find .env file using Viper
-	dir := vp.currentDir
+	dir := v.currentDir
 	var envFile string
 
 	// Try environment-specific .env first
-	if vp.environment != "" {
-		envSpecific := filepath.Join(dir, ".env."+vp.environment)
+	if v.environment != "" {
+		envSpecific := filepath.Join(dir, ".env."+v.environment)
 		if _, err := os.Stat(envSpecific); err == nil {
 			envFile = envSpecific
 		}
@@ -346,16 +348,16 @@ func (vp *VariableProcessor) resolveDotenv(args []string) (string, error) {
 	}
 
 	// Use Viper to read the .env file
-	v := viper.New()
-	v.SetConfigFile(envFile)
-	v.SetConfigType("env")
+	vp := viper.New()
+	vp.SetConfigFile(envFile)
+	vp.SetConfigType("env")
 
-	if err := v.ReadInConfig(); err != nil {
+	if err := vp.ReadInConfig(); err != nil {
 		return "", errors.Wrapf(err, "dotenv file not found: %s", envFile)
 	}
 
-	val := v.GetString(varName)
-	if val == "" && !v.IsSet(varName) {
+	val := vp.GetString(varName)
+	if val == "" && !vp.IsSet(varName) {
 		return "", errors.NewValidationErrorWithValue("dotenv variable", varName, "not found")
 	}
 
@@ -363,7 +365,7 @@ func (vp *VariableProcessor) resolveDotenv(args []string) (string, error) {
 }
 
 // resolvePrompt resolves $prompt variable by prompting the user for input
-func (vp *VariableProcessor) resolvePrompt(args []string) (string, error) {
+func (v *VariableProcessor) resolvePrompt(args []string) (string, error) {
 	if len(args) == 0 {
 		return "", errors.NewValidationError("$prompt", "requires a variable name")
 	}
@@ -382,29 +384,29 @@ func (vp *VariableProcessor) resolvePrompt(args []string) (string, error) {
 	}
 
 	// Use the prompt handler if available
-	if vp.promptHandler != nil {
-		return vp.promptHandler(varName, description, isPassword)
+	if v.promptHandler != nil {
+		return v.promptHandler(varName, description, isPassword)
 	}
 
 	return "", errors.NewValidationErrorWithValue("$prompt", varName, "no prompt handler configured")
 }
 
 // resolveEnvironmentVariable resolves an environment variable from config
-func (vp *VariableProcessor) resolveEnvironmentVariable(name string) (string, error) {
+func (v *VariableProcessor) resolveEnvironmentVariable(name string) (string, error) {
 	// Check shared environment first
-	if shared, ok := vp.envVariables["$shared"]; ok {
+	if shared, ok := v.envVariables["$shared"]; ok {
 		if val, ok := shared[name]; ok {
 			// Recursively resolve
-			resolved, _ := vp.Process(val)
+			resolved, _ := v.Process(val)
 			return resolved, nil
 		}
 	}
 
 	// Check current environment
-	if vp.environment != "" {
-		if env, ok := vp.envVariables[vp.environment]; ok {
+	if v.environment != "" {
+		if env, ok := v.envVariables[v.environment]; ok {
 			if val, ok := env[name]; ok {
-				resolved, _ := vp.Process(val)
+				resolved, _ := v.Process(val)
 				return resolved, nil
 			}
 		}
@@ -414,7 +416,7 @@ func (vp *VariableProcessor) resolveEnvironmentVariable(name string) (string, er
 }
 
 // resolveRequestVariable resolves a request variable (e.g., loginAPI.response.body.$.token)
-func (vp *VariableProcessor) resolveRequestVariable(name string) (string, error) {
+func (v *VariableProcessor) resolveRequestVariable(name string) (string, error) {
 	// Parse the variable reference
 	// Format: requestName.(response|request).(body|headers).(path|headerName)
 	parts := strings.SplitN(name, ".", 4)
@@ -427,7 +429,7 @@ func (vp *VariableProcessor) resolveRequestVariable(name string) (string, error)
 	bodyOrHeaders := parts[2]
 	path := parts[3]
 
-	result, ok := vp.requestResults[requestName]
+	result, ok := v.requestResults[requestName]
 	if !ok {
 		return "", errors.NewValidationErrorWithValue("request", requestName, "not found in cache")
 	}
@@ -438,10 +440,8 @@ func (vp *VariableProcessor) resolveRequestVariable(name string) (string, error)
 			return extractFromBody(result.Body, path)
 		} else if bodyOrHeaders == "headers" {
 			// Header extraction
-			for k, v := range result.Headers {
-				if strings.EqualFold(k, path) && len(v) > 0 {
-					return v[0], nil
-				}
+			if val, ok := httputil.GetHeaderFromSlice(result.Headers, path); ok {
+				return val, nil
 			}
 			return "", errors.NewValidationErrorWithValue("header", path, "not found")
 		}

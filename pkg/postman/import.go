@@ -38,19 +38,19 @@ func NewNameTracker() *NameTracker {
 }
 
 // GetUniqueName returns a unique name, appending _2, _3, etc. for duplicates
-func (nt *NameTracker) GetUniqueName(name string) string {
+func (n *NameTracker) GetUniqueName(name string) string {
 	if name == "" {
 		return ""
 	}
 
-	count, exists := nt.usedNames[name]
+	count, exists := n.usedNames[name]
 	if !exists {
-		nt.usedNames[name] = 1
+		n.usedNames[name] = 1
 		return name
 	}
 
 	// Increment count and return unique name
-	nt.usedNames[name] = count + 1
+	n.usedNames[name] = count + 1
 	return fmt.Sprintf("%s_%d", name, count+1)
 }
 

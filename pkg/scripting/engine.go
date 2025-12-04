@@ -1,3 +1,6 @@
+// Package scripting provides a JavaScript execution engine for pre-request
+// and post-response scripts, with built-in utilities for assertions, crypto,
+// and variable management.
 package scripting
 
 import (
@@ -14,6 +17,7 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/google/uuid"
+	"github.com/ideaspaper/restclient/internal/httputil"
 	"github.com/ideaspaper/restclient/pkg/errors"
 )
 
@@ -340,10 +344,8 @@ func (e *Engine) createRequestObject(ctx *ScriptContext) map[string]any {
 					return goja.Null()
 				}
 				name := call.Arguments[0].String()
-				for k, v := range req.Headers {
-					if strings.EqualFold(k, name) {
-						return e.vm.ToValue(v)
-					}
+				if val, ok := httputil.GetHeader(req.Headers, name); ok {
+					return e.vm.ToValue(val)
 				}
 				return goja.Null()
 			},

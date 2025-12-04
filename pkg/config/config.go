@@ -1,3 +1,5 @@
+// Package config provides application configuration management with support
+// for JSON config files, viper integration, and hot-reloading.
 package config
 
 import (

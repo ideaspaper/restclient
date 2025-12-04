@@ -667,7 +667,7 @@ func TestDescriptionUnmarshal(t *testing.T) {
 func TestScriptGetExec(t *testing.T) {
 	// Test array exec
 	script1 := Script{
-		Exec: []interface{}{"line1", "line2", "line3"},
+		Exec: []any{"line1", "line2", "line3"},
 	}
 	if script1.GetExec() != "line1\nline2\nline3" {
 		t.Errorf("Unexpected exec: %s", script1.GetExec())

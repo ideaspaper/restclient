@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ideaspaper/restclient/internal/constants"
+	"github.com/ideaspaper/restclient/internal/httputil"
 )
 
 // HttpResponse represents an HTTP response
@@ -65,20 +66,16 @@ func NewHttpResponse(resp *http.Response, bodyBuffer []byte, timing ResponseTimi
 
 // ContentType returns the content type of the response
 func (r *HttpResponse) ContentType() string {
-	for k, v := range r.Headers {
-		if strings.EqualFold(k, "content-type") && len(v) > 0 {
-			return v[0]
-		}
+	if ct, ok := httputil.GetHeaderFromSlice(r.Headers, "content-type"); ok {
+		return ct
 	}
 	return ""
 }
 
 // GetHeader returns a header value (case-insensitive)
 func (r *HttpResponse) GetHeader(name string) string {
-	for k, v := range r.Headers {
-		if strings.EqualFold(k, name) && len(v) > 0 {
-			return v[0]
-		}
+	if val, ok := httputil.GetHeaderFromSlice(r.Headers, name); ok {
+		return val
 	}
 	return ""
 }

@@ -587,7 +587,7 @@ func TestParseURLWithVariables(t *testing.T) {
 	tests := []struct {
 		name         string
 		rawURL       string
-		expectedHost interface{}
+		expectedHost any
 		expectedPath []string
 		expectedRaw  string
 	}{

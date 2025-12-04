@@ -249,6 +249,78 @@ func (m *MockFileSystem) UserHomeDir() (string, error) {
 	return m.HomeDir, nil
 }
 
+// ReadDir reads the named directory and returns all its directory entries.
+func (m *MockFileSystem) ReadDir(name string) ([]fs.DirEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if err := m.pathError(name); err != nil {
+		return nil, err
+	}
+
+	// Check if the directory exists
+	exists := false
+	if m.Dirs[name] {
+		exists = true
+	}
+	// Also check if any file exists under this path (implicit directory)
+	prefix := name + "/"
+	for p := range m.Files {
+		if strings.HasPrefix(p, prefix) {
+			exists = true
+			break
+		}
+	}
+	if !exists {
+		return nil, &fs.PathError{Op: "readdir", Path: name, Err: fs.ErrNotExist}
+	}
+
+	var entries []fs.DirEntry
+	seen := make(map[string]bool)
+
+	// Find all direct children (files)
+	for path := range m.Files {
+		if strings.HasPrefix(path, prefix) {
+			rest := path[len(prefix):]
+			// Get the first component (direct child)
+			if idx := strings.Index(rest, "/"); idx >= 0 {
+				// This is a directory
+				dirName := rest[:idx]
+				if !seen[dirName] {
+					seen[dirName] = true
+					entries = append(entries, &mockDirEntry{name: dirName, isDir: true})
+				}
+			} else {
+				// This is a file
+				if !seen[rest] {
+					seen[rest] = true
+					entries = append(entries, &mockDirEntry{name: rest, isDir: false})
+				}
+			}
+		}
+	}
+
+	// Find all direct children (explicit directories)
+	for path := range m.Dirs {
+		if strings.HasPrefix(path, prefix) {
+			rest := path[len(prefix):]
+			// Get the first component (direct child)
+			if idx := strings.Index(rest, "/"); idx >= 0 {
+				dirName := rest[:idx]
+				if !seen[dirName] {
+					seen[dirName] = true
+					entries = append(entries, &mockDirEntry{name: dirName, isDir: true})
+				}
+			} else if rest != "" && !seen[rest] {
+				seen[rest] = true
+				entries = append(entries, &mockDirEntry{name: rest, isDir: true})
+			}
+		}
+	}
+
+	return entries, nil
+}
+
 // --- Helper methods for test setup ---
 
 // WithFile adds a file to the mock file system and returns the mock for chaining.
@@ -347,3 +419,22 @@ func (m *mockFileInfo) Mode() fs.FileMode  { return 0644 }
 func (m *mockFileInfo) ModTime() time.Time { return time.Now() }
 func (m *mockFileInfo) IsDir() bool        { return m.isDir }
 func (m *mockFileInfo) Sys() any           { return nil }
+
+// mockDirEntry implements fs.DirEntry for the mock file system.
+type mockDirEntry struct {
+	name  string
+	isDir bool
+}
+
+func (m *mockDirEntry) Name() string { return m.name }
+func (m *mockDirEntry) IsDir() bool  { return m.isDir }
+func (m *mockDirEntry) Type() fs.FileMode {
+	if m.isDir {
+		return fs.ModeDir
+	} else {
+		return 0
+	}
+}
+func (m *mockDirEntry) Info() (fs.FileInfo, error) {
+	return &mockFileInfo{name: m.name, isDir: m.isDir}, nil
+}

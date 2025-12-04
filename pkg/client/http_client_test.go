@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ideaspaper/restclient/internal/constants"
 	"github.com/ideaspaper/restclient/pkg/auth"
 	"github.com/ideaspaper/restclient/pkg/models"
 )
@@ -35,8 +36,8 @@ func TestDefaultConfig(t *testing.T) {
 	if !config.RememberCookies {
 		t.Error("RememberCookies should be true by default")
 	}
-	if config.DefaultHeaders["User-Agent"] != "restclient-cli" {
-		t.Errorf("User-Agent = %v, want restclient-cli", config.DefaultHeaders["User-Agent"])
+	if config.DefaultHeaders[constants.HeaderUserAgent] != constants.DefaultUserAgent {
+		t.Errorf("User-Agent = %v, want %s", config.DefaultHeaders[constants.HeaderUserAgent], constants.DefaultUserAgent)
 	}
 }
 
@@ -75,7 +76,7 @@ func TestSendGetRequest(t *testing.T) {
 		if r.URL.Path != "/test" {
 			t.Errorf("Expected /test, got %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(constants.HeaderContentType, constants.MIMEApplicationJSON)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"message": "hello"}`))
 	}))
@@ -92,8 +93,8 @@ func TestSendGetRequest(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Errorf("StatusCode = %v, want 200", resp.StatusCode)
 	}
-	if !strings.Contains(string(resp.Body), "hello") {
-		t.Errorf("Body = %v, want to contain 'hello'", string(resp.Body))
+	if !strings.Contains(resp.Body, "hello") {
+		t.Errorf("Body = %v, want to contain 'hello'", resp.Body)
 	}
 }
 
@@ -112,7 +113,7 @@ func TestSendPostRequest(t *testing.T) {
 
 	client, _ := NewHttpClient(nil)
 	req := models.NewHttpRequest("POST", server.URL+"/create", map[string]string{
-		"Content-Type": "text/plain",
+		constants.HeaderContentType: constants.MIMETextPlain,
 	}, strings.NewReader("test data"), "test data", "")
 
 	resp, err := client.Send(req)
@@ -155,8 +156,8 @@ func TestSendWithHeaders(t *testing.T) {
 
 func TestDefaultHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("User-Agent") != "restclient-cli" {
-			t.Errorf("User-Agent = %v, want restclient-cli", r.Header.Get("User-Agent"))
+		if r.Header.Get(constants.HeaderUserAgent) != constants.DefaultUserAgent {
+			t.Errorf("User-Agent = %v, want %s", r.Header.Get(constants.HeaderUserAgent), constants.DefaultUserAgent)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -225,7 +226,7 @@ func TestFollowRedirects(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Errorf("StatusCode = %v, want 200 (followed redirect)", resp.StatusCode)
 	}
-	if !strings.Contains(string(resp.Body), "target reached") {
+	if !strings.Contains(resp.Body, "target reached") {
 		t.Error("Should have followed redirect to target")
 	}
 }
@@ -387,7 +388,7 @@ func TestGzipResponse(t *testing.T) {
 	// This test verifies the client can handle gzip responses
 	// The httptest server doesn't automatically gzip, so we test with uncompressed
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(constants.HeaderContentType, constants.MIMEApplicationJSON)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status": "ok"}`))
 	}))
@@ -401,8 +402,8 @@ func TestGzipResponse(t *testing.T) {
 		t.Fatalf("Send() error = %v", err)
 	}
 
-	if !strings.Contains(string(resp.Body), "ok") {
-		t.Errorf("Body = %v, want to contain 'ok'", string(resp.Body))
+	if !strings.Contains(resp.Body, "ok") {
+		t.Errorf("Body = %v, want to contain 'ok'", resp.Body)
 	}
 }
 
@@ -560,8 +561,8 @@ func TestDigestAuthWithBody(t *testing.T) {
 
 	client, _ := NewHttpClient(nil)
 	req := models.NewHttpRequest("POST", server.URL+"/protected", map[string]string{
-		"Authorization": "Digest user password",
-		"Content-Type":  "text/plain",
+		constants.HeaderAuthorization: "Digest user password",
+		constants.HeaderContentType:   constants.MIMETextPlain,
 	}, strings.NewReader("test-data"), "test-data", "")
 
 	resp, err := client.Send(req)
@@ -577,9 +578,9 @@ func TestDigestAuthWithBody(t *testing.T) {
 // TestMultipartFormData tests sending multipart/form-data requests
 func TestMultipartFormData(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		contentType := r.Header.Get("Content-Type")
-		if !strings.Contains(contentType, "multipart/form-data") {
-			t.Errorf("Content-Type = %v, want multipart/form-data", contentType)
+		contentType := r.Header.Get(constants.HeaderContentType)
+		if !strings.Contains(contentType, constants.MIMEMultipartFormData) {
+			t.Errorf("Content-Type = %v, want %s", contentType, constants.MIMEMultipartFormData)
 		}
 
 		err := r.ParseMultipartForm(10 << 20)
@@ -684,8 +685,8 @@ func TestMultipartWithCustomContentType(t *testing.T) {
 		defer file.Close()
 
 		// Check that custom content type was set
-		if header.Header.Get("Content-Type") != "application/json" {
-			t.Errorf("Content-Type = %v, want application/json", header.Header.Get("Content-Type"))
+		if header.Header.Get(constants.HeaderContentType) != constants.MIMEApplicationJSON {
+			t.Errorf("Content-Type = %v, want %s", header.Header.Get(constants.HeaderContentType), constants.MIMEApplicationJSON)
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -695,7 +696,7 @@ func TestMultipartWithCustomContentType(t *testing.T) {
 	client, _ := NewHttpClient(nil)
 	req := models.NewHttpRequest("POST", server.URL+"/upload", map[string]string{}, nil, "", "")
 	req.MultipartParts = []models.MultipartPart{
-		{Name: "config", FilePath: tmpFile, IsFile: true, ContentType: "application/json"},
+		{Name: "config", FilePath: tmpFile, IsFile: true, ContentType: constants.MIMEApplicationJSON},
 	}
 
 	resp, err := client.Send(req)
@@ -728,8 +729,8 @@ func TestMultipartFileNotFound(t *testing.T) {
 // TestGzipResponseDecoding tests automatic gzip response decompression
 func TestGzipResponseDecoding(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(constants.HeaderContentEncoding, "gzip")
+		w.Header().Set(constants.HeaderContentType, constants.MIMEApplicationJSON)
 
 		var buf bytes.Buffer
 		gz := gzip.NewWriter(&buf)

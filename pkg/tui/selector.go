@@ -1,3 +1,5 @@
+// Package tui provides terminal user interface components including
+// a fuzzy-search selector for selecting items from lists.
 package tui
 
 import (

@@ -115,3 +115,21 @@ func printMarker(marked bool) string {
 	}
 	return "  "
 }
+
+// printTestPass prints a passing test result
+func printTestPass(name string) {
+	if useColors() {
+		fmt.Printf("  %s %s\n", successColor.Sprint("✓"), name)
+	} else {
+		fmt.Printf("  [PASS] %s\n", name)
+	}
+}
+
+// printTestFail prints a failing test result
+func printTestFail(name, errMsg string) {
+	if useColors() {
+		fmt.Printf("  %s %s: %s\n", errorColor.Sprint("✗"), name, errMsg)
+	} else {
+		fmt.Printf("  [FAIL] %s: %s\n", name, errMsg)
+	}
+}

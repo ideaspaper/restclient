@@ -142,6 +142,7 @@ restclient send <file.http> [flags]
 | `--skip-validate` | | Skip request validation |
 | `--session` | | Use a named session instead of directory-based |
 | `--no-session` | | Don't load or save session state |
+| `--strict` | | Error on duplicate `@name` values instead of warning |
 
 **Examples:**
 

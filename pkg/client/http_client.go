@@ -1,3 +1,5 @@
+// Package client provides an HTTP client with support for various authentication
+// schemes, cookies, proxies, TLS certificates, and response timing.
 package client
 
 import (
@@ -128,7 +130,12 @@ func NewHttpClient(config *ClientConfig) (*HttpClient, error) {
 
 	client := &http.Client{
 		Transport: transport,
-		Jar:       jar, // Will be nil if RememberCookies is false
+	}
+
+	// Only set jar if RememberCookies is enabled
+	// Setting Jar to nil explicitly still causes http.Client to call jar.Cookies()
+	if jar != nil {
+		client.Jar = jar
 	}
 
 	if config.Timeout > 0 {
@@ -223,15 +230,22 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 		authHeader := resp.Header.Get("WWW-Authenticate")
 		if strings.HasPrefix(strings.ToLower(authHeader), "digest ") {
 			// Retry with digest auth if we have credentials
-			if digestResp, err := c.handleDigestAuth(ctx, request, resp, authHeader); err == nil {
+			digestResp, digestErr := c.handleDigestAuth(ctx, request, resp, authHeader)
+			if digestErr == nil && digestResp != resp {
 				// Close the original response body before replacing
 				resp.Body.Close()
 				resp = digestResp
 				// Note: the new response body will be closed by the defer above
 				// since we reassigned resp
-			} else if _, hasCredentials := c.authProcessor.GetDigestCredentials(request.URL); hasCredentials {
-				// Log warning if retry failed but credentials were provided
-				fmt.Fprintf(os.Stderr, "Warning: digest auth retry failed: %v\n", err)
+			} else if digestErr != nil {
+				// Close the digest response if it's different from original and we got an error
+				if digestResp != nil && digestResp != resp {
+					digestResp.Body.Close()
+				}
+				if _, hasCredentials := c.authProcessor.GetDigestCredentials(request.URL); hasCredentials {
+					// Log warning if retry failed but credentials were provided
+					fmt.Fprintf(os.Stderr, "Warning: digest auth retry failed: %v\n", digestErr)
+				}
 			}
 		}
 	}

@@ -1,3 +1,5 @@
+// Package models defines the core data structures for HTTP requests, responses,
+// and their associated metadata used throughout the application.
 package models
 
 import (
@@ -7,6 +9,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/ideaspaper/restclient/internal/httputil"
 )
 
 // ValidationError represents a request validation error
@@ -102,10 +106,8 @@ func NewHttpRequest(method, url string, headers map[string]string, body io.Reade
 
 // ContentType returns the content type of the request
 func (r *HttpRequest) ContentType() string {
-	for k, v := range r.Headers {
-		if strings.EqualFold(k, "content-type") {
-			return v
-		}
+	if ct, ok := httputil.GetHeader(r.Headers, "content-type"); ok {
+		return ct
 	}
 	return ""
 }

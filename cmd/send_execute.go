@@ -94,17 +94,9 @@ func printTestResults(tests []scripting.TestResult) {
 	fmt.Println("Test Results:")
 	for _, test := range tests {
 		if test.Passed {
-			if useColors() {
-				fmt.Printf("  %s %s\n", successColor.Sprint("✓"), test.Name)
-			} else {
-				fmt.Printf("  [PASS] %s\n", test.Name)
-			}
+			printTestPass(test.Name)
 		} else {
-			if useColors() {
-				fmt.Printf("  %s %s: %s\n", errorColor.Sprint("✗"), test.Name, test.Error)
-			} else {
-				fmt.Printf("  [FAIL] %s: %s\n", test.Name, test.Error)
-			}
+			printTestFail(test.Name, test.Error)
 		}
 	}
 }

@@ -1,7 +1,9 @@
+// Package parser provides functionality for parsing .http and .rest files
+// into structured HTTP request models with support for variables, multipart
+// forms, and embedded scripts.
 package parser
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/ideaspaper/restclient/internal/constants"
+	"github.com/ideaspaper/restclient/internal/httputil"
 	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/models"
 )
@@ -400,7 +403,7 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	// Auto-detect GraphQL by URL path or content-type
 	if !isGraphQL {
 		if strings.HasSuffix(url, "/graphql") || strings.Contains(url, "/graphql?") {
-			contentType, _ := getHeaderCaseInsensitive(headers, constants.HeaderContentType)
+			contentType, _ := httputil.GetHeader(headers, constants.HeaderContentType)
 			if contentType == "" || strings.Contains(contentType, constants.MIMEApplicationJSON) {
 				isGraphQL = true
 			}
@@ -414,7 +417,7 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	}
 
 	// Handle Host header for relative URLs
-	if hostHeader, ok := getHeaderCaseInsensitive(headers, constants.HeaderHost); ok && strings.HasPrefix(url, "/") {
+	if hostHeader, ok := httputil.GetHeader(headers, constants.HeaderHost); ok && strings.HasPrefix(url, "/") {
 		scheme := "http"
 		if strings.Contains(hostHeader, ":443") || strings.Contains(hostHeader, ":8443") {
 			scheme = "https"
@@ -426,7 +429,7 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	req.Metadata = metadata
 
 	// Parse multipart parts if applicable
-	contentType, _ := getHeaderCaseInsensitive(headers, constants.HeaderContentType)
+	contentType, _ := httputil.GetHeader(headers, constants.HeaderContentType)
 	if isMultiPartFormData(contentType) {
 		req.MultipartParts = p.parseMultipartParts(rawBody, contentType)
 	}
@@ -572,16 +575,6 @@ func parseHeaders(lines []string, defaultHeaders map[string]string, url string) 
 	return headers
 }
 
-// getHeaderCaseInsensitive gets a header value case-insensitively
-func getHeaderCaseInsensitive(headers map[string]string, name string) (string, bool) {
-	for k, v := range headers {
-		if strings.EqualFold(k, name) {
-			return v, true
-		}
-	}
-	return "", false
-}
-
 // parseBody parses the request body
 func (p *HttpRequestParser) parseBody(lines []string, headers map[string]string, isGraphQL bool) (io.Reader, string, error) {
 	if len(lines) == 0 {
@@ -599,7 +592,7 @@ func (p *HttpRequestParser) parseBody(lines []string, headers map[string]string,
 		return nil, "", nil
 	}
 
-	contentType, _ := getHeaderCaseInsensitive(headers, constants.HeaderContentType)
+	contentType, _ := httputil.GetHeader(headers, constants.HeaderContentType)
 
 	// Check for file reference
 	inputFileRegex := regexp.MustCompile(`^<(?:@(?:(\w+))?)?[ \t]+(.+?)\s*$`)
@@ -653,199 +646,6 @@ func (p *HttpRequestParser) parseBody(lines []string, headers map[string]string,
 	}
 
 	return strings.NewReader(rawBody), rawBody, nil
-}
-
-// parseMultipartParts parses multipart form data from the body
-func (p *HttpRequestParser) parseMultipartParts(rawBody string, contentType string) []models.MultipartPart {
-	var parts []models.MultipartPart
-
-	// Extract boundary from Content-Type
-	boundary := extractBoundary(contentType)
-	if boundary == "" {
-		return parts
-	}
-
-	// Split by boundary
-	delimiter := "--" + boundary
-	sections := strings.Split(rawBody, delimiter)
-
-	for _, section := range sections {
-		section = strings.TrimSpace(section)
-		if section == "" || section == "--" {
-			continue
-		}
-
-		// Remove trailing -- for last part
-		section = strings.TrimSuffix(section, "--")
-		section = strings.TrimSpace(section)
-
-		if section == "" {
-			continue
-		}
-
-		// Parse part
-		part := parseMultipartSection(section)
-		if part.Name != "" {
-			// Check if value is a file reference
-			if strings.HasPrefix(strings.TrimSpace(part.Value), "< ") {
-				filePath := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(part.Value), "< "))
-				part.FilePath = filePath
-				part.IsFile = true
-				part.Value = ""
-			}
-			parts = append(parts, part)
-		}
-	}
-
-	return parts
-}
-
-// extractBoundary extracts the boundary from Content-Type header
-func extractBoundary(contentType string) string {
-	parts := strings.Split(contentType, ";")
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(strings.ToLower(part), "boundary=") {
-			boundary := strings.TrimPrefix(part, "boundary=")
-			boundary = strings.TrimPrefix(boundary, "Boundary=")
-			boundary = strings.TrimPrefix(boundary, "BOUNDARY=")
-			boundary = strings.Trim(boundary, `"`)
-			return boundary
-		}
-	}
-	return ""
-}
-
-// parseMultipartSection parses a single multipart section
-func parseMultipartSection(section string) models.MultipartPart {
-	var part models.MultipartPart
-
-	// Split headers from body (separated by empty line)
-	parts := strings.SplitN(section, "\r\n\r\n", 2)
-	if len(parts) == 1 {
-		parts = strings.SplitN(section, "\n\n", 2)
-	}
-
-	if len(parts) == 0 {
-		return part
-	}
-
-	headerSection := parts[0]
-	if len(parts) > 1 {
-		part.Value = strings.TrimSpace(parts[1])
-	}
-
-	// Parse Content-Disposition
-	dispositionRegex := regexp.MustCompile(`(?i)Content-Disposition:\s*form-data;\s*(.+)`)
-	if matches := dispositionRegex.FindStringSubmatch(headerSection); matches != nil {
-		params := matches[1]
-
-		// Extract name
-		nameRegex := regexp.MustCompile(`name="([^"]+)"`)
-		if nameMatches := nameRegex.FindStringSubmatch(params); nameMatches != nil {
-			part.Name = nameMatches[1]
-		}
-
-		// Extract filename
-		filenameRegex := regexp.MustCompile(`filename="([^"]+)"`)
-		if fnMatches := filenameRegex.FindStringSubmatch(params); fnMatches != nil {
-			part.FileName = fnMatches[1]
-			part.IsFile = true
-		}
-	}
-
-	// Parse Content-Type
-	ctRegex := regexp.MustCompile(`(?i)Content-Type:\s*(.+)`)
-	if matches := ctRegex.FindStringSubmatch(headerSection); matches != nil {
-		part.ContentType = strings.TrimSpace(matches[1])
-	}
-
-	return part
-}
-
-// readFileContent reads content from a file
-func (p *HttpRequestParser) readFileContent(filePath, encoding string) (string, error) {
-	// Try absolute path first
-	if filepath.IsAbs(filePath) {
-		return readFile(filePath, encoding)
-	}
-
-	// Try relative to base directory
-	if p.baseDir != "" {
-		absPath := filepath.Join(p.baseDir, filePath)
-		if content, err := readFile(absPath, encoding); err == nil {
-			return content, nil
-		}
-	}
-
-	// Try current working directory
-	cwd, _ := os.Getwd()
-	absPath := filepath.Join(cwd, filePath)
-	return readFile(absPath, encoding)
-}
-
-// readFile reads a file and returns its content
-// encoding parameter is reserved for future use (e.g., handling different character encodings)
-func readFile(path, _ string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
-
-	return strings.Join(lines, "\n"), nil
-}
-
-// isFormUrlEncoded checks if content type is form-urlencoded
-func isFormUrlEncoded(contentType string) bool {
-	return strings.Contains(strings.ToLower(contentType), "application/x-www-form-urlencoded")
-}
-
-// isMultiPartFormData checks if content type is multipart form data
-func isMultiPartFormData(contentType string) bool {
-	return strings.Contains(strings.ToLower(contentType), "multipart/form-data")
-}
-
-// createGraphQLBody wraps the body in GraphQL JSON format
-func createGraphQLBody(body string) string {
-	// Split into query and variables
-	parts := strings.SplitN(body, "\n\n", 2)
-	query := parts[0]
-	variables := "{}"
-	if len(parts) > 1 && strings.TrimSpace(parts[1]) != "" {
-		variables = strings.TrimSpace(parts[1])
-	}
-
-	// Extract operation name from query, mutation, or subscription
-	operationName := ""
-	opRegex := regexp.MustCompile(`^\s*(?:query|mutation|subscription)\s+(\w+)`)
-	if matches := opRegex.FindStringSubmatch(query); matches != nil {
-		operationName = matches[1]
-	}
-
-	// Build JSON payload
-	query = strings.ReplaceAll(query, "\\", "\\\\")
-	query = strings.ReplaceAll(query, "\"", "\\\"")
-	query = strings.ReplaceAll(query, "\n", "\\n")
-	query = strings.ReplaceAll(query, "\r", "\\r")
-	query = strings.ReplaceAll(query, "\t", "\\t")
-
-	result := fmt.Sprintf(`{"query":"%s"`, query)
-	if operationName != "" {
-		result += fmt.Sprintf(`,"operationName":"%s"`, operationName)
-	}
-	result += fmt.Sprintf(`,"variables":%s}`, variables)
-
-	return result
 }
 
 // ParseFile parses an HTTP request file
