@@ -16,6 +16,7 @@ type InputField struct {
 	Description string // Optional description for the field
 	Default     string // Default value (from session)
 	Value       string // Current value
+	IsSecret    bool   // Whether the field should be masked (password-style input)
 }
 
 // InputFormModel is a Bubbletea model for multi-field input.
@@ -72,6 +73,12 @@ func NewInputFormModel(fields []InputField, useColors bool) InputFormModel {
 		ti.Placeholder = fmt.Sprintf("Enter %s", field.Name)
 		ti.CharLimit = 256
 		ti.Width = 40
+
+		// Enable password mode for secret fields
+		if field.IsSecret {
+			ti.EchoMode = textinput.EchoPassword
+			ti.EchoCharacter = '*'
+		}
 
 		// Pre-fill with default value if available
 		if field.Default != "" {
@@ -164,6 +171,8 @@ func (m InputFormModel) View() string {
 			value := m.inputs[i].Value()
 			if value == "" {
 				value = "(empty)"
+			} else if field.IsSecret {
+				value = "<secret>"
 			}
 			b.WriteString(fmt.Sprintf("- %s: %s\n", field.Name, value))
 		}

@@ -464,23 +464,23 @@ func TestSessionManager_UserInputs(t *testing.T) {
 	}
 
 	// Test SetUserInputs and GetUserInputs
-	values := map[string]string{
-		"id":   "123",
-		"page": "1",
+	entries := map[string]UserInputEntry{
+		"id":   {Value: "123"},
+		"page": {Value: "1"},
 	}
 	urlKey := "api.example.com/posts/{{:id}}?page={{:page}}"
-	sm.SetUserInputs(urlKey, values)
+	sm.SetUserInputs(urlKey, entries)
 
 	// Test GetUserInputs
 	retrieved := sm.GetUserInputs(urlKey)
 	if retrieved == nil {
 		t.Fatal("GetUserInputs() should return stored values")
 	}
-	if retrieved["id"] != "123" {
-		t.Errorf("GetUserInputs()[id] = %v, want %v", retrieved["id"], "123")
+	if retrieved["id"].Value != "123" {
+		t.Errorf("GetUserInputs()[id].Value = %v, want %v", retrieved["id"].Value, "123")
 	}
-	if retrieved["page"] != "1" {
-		t.Errorf("GetUserInputs()[page] = %v, want %v", retrieved["page"], "1")
+	if retrieved["page"].Value != "1" {
+		t.Errorf("GetUserInputs()[page].Value = %v, want %v", retrieved["page"].Value, "1")
 	}
 
 	// Test non-existent key
@@ -512,12 +512,12 @@ func TestSessionManager_UserInputsPersistence(t *testing.T) {
 		t.Fatalf("NewSessionManager() error = %v", err)
 	}
 
-	values := map[string]string{
-		"userId": "42",
-		"postId": "99",
+	entries := map[string]UserInputEntry{
+		"userId": {Value: "42"},
+		"postId": {Value: "99"},
 	}
 	urlKey := "api.example.com/users/{{:userId}}/posts/{{:postId}}"
-	sm1.SetUserInputs(urlKey, values)
+	sm1.SetUserInputs(urlKey, entries)
 
 	// Save to disk
 	if err := sm1.Save(); err != nil {
@@ -539,11 +539,11 @@ func TestSessionManager_UserInputsPersistence(t *testing.T) {
 	if retrieved == nil {
 		t.Fatal("After Load(), GetUserInputs() should return stored values")
 	}
-	if retrieved["userId"] != "42" {
-		t.Errorf("After Load(), GetUserInputs()[userId] = %v, want %v", retrieved["userId"], "42")
+	if retrieved["userId"].Value != "42" {
+		t.Errorf("After Load(), GetUserInputs()[userId].Value = %v, want %v", retrieved["userId"].Value, "42")
 	}
-	if retrieved["postId"] != "99" {
-		t.Errorf("After Load(), GetUserInputs()[postId] = %v, want %v", retrieved["postId"], "99")
+	if retrieved["postId"].Value != "99" {
+		t.Errorf("After Load(), GetUserInputs()[postId].Value = %v, want %v", retrieved["postId"].Value, "99")
 	}
 }
 
@@ -556,19 +556,19 @@ func TestSessionManager_UserInputsMultipleURLs(t *testing.T) {
 	}
 
 	// Store inputs for multiple URL patterns
-	sm.SetUserInputs("api.example.com/users/{{:id}}", map[string]string{"id": "1"})
-	sm.SetUserInputs("api.example.com/posts/{{:id}}", map[string]string{"id": "2"})
-	sm.SetUserInputs("other.example.com/items/{{:id}}", map[string]string{"id": "3"})
+	sm.SetUserInputs("api.example.com/users/{{:id}}", map[string]UserInputEntry{"id": {Value: "1"}})
+	sm.SetUserInputs("api.example.com/posts/{{:id}}", map[string]UserInputEntry{"id": {Value: "2"}})
+	sm.SetUserInputs("other.example.com/items/{{:id}}", map[string]UserInputEntry{"id": {Value: "3"}})
 
 	// Verify each URL key has its own values
-	if v := sm.GetUserInputs("api.example.com/users/{{:id}}"); v["id"] != "1" {
-		t.Errorf("Users endpoint id = %v, want %v", v["id"], "1")
+	if v := sm.GetUserInputs("api.example.com/users/{{:id}}"); v["id"].Value != "1" {
+		t.Errorf("Users endpoint id = %v, want %v", v["id"].Value, "1")
 	}
-	if v := sm.GetUserInputs("api.example.com/posts/{{:id}}"); v["id"] != "2" {
-		t.Errorf("Posts endpoint id = %v, want %v", v["id"], "2")
+	if v := sm.GetUserInputs("api.example.com/posts/{{:id}}"); v["id"].Value != "2" {
+		t.Errorf("Posts endpoint id = %v, want %v", v["id"].Value, "2")
 	}
-	if v := sm.GetUserInputs("other.example.com/items/{{:id}}"); v["id"] != "3" {
-		t.Errorf("Other API id = %v, want %v", v["id"], "3")
+	if v := sm.GetUserInputs("other.example.com/items/{{:id}}"); v["id"].Value != "3" {
+		t.Errorf("Other API id = %v, want %v", v["id"].Value, "3")
 	}
 
 	// Verify total count
@@ -588,24 +588,24 @@ func TestSessionManager_UserInputsCopyOnReadWrite(t *testing.T) {
 
 	// Set initial values
 	urlKey := "api.example.com/posts/{{:id}}"
-	original := map[string]string{"id": "123"}
+	original := map[string]UserInputEntry{"id": {Value: "123"}}
 	sm.SetUserInputs(urlKey, original)
 
 	// Modify the original map after setting
-	original["id"] = "999"
+	original["id"] = UserInputEntry{Value: "999"}
 
 	// Verify stored values are not affected
 	retrieved := sm.GetUserInputs(urlKey)
-	if retrieved["id"] != "123" {
+	if retrieved["id"].Value != "123" {
 		t.Error("SetUserInputs should copy values, not store reference")
 	}
 
 	// Modify retrieved map
-	retrieved["id"] = "888"
+	retrieved["id"] = UserInputEntry{Value: "888"}
 
 	// Verify stored values are not affected
 	retrieved2 := sm.GetUserInputs(urlKey)
-	if retrieved2["id"] != "123" {
+	if retrieved2["id"].Value != "123" {
 		t.Error("GetUserInputs should return copy, not reference")
 	}
 }

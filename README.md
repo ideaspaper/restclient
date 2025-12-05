@@ -717,22 +717,49 @@ User input variables use the `{{:paramName}}` syntax and are ideal for dynamic p
 **Syntax:**
 
 ```http
-{{:paramName}}
+{{:paramName}}           # Regular input
+{{:paramName!secret}}    # Secret input (masked in UI and logs)
 ```
+
+**Secret Inputs:**
+
+Use the `!secret` suffix for sensitive values like passwords, API keys, or tokens:
+
+```http
+### Login with secret password
+POST https://api.example.com/login
+Content-Type: application/json
+
+{
+  "username": "{{:username}}",
+  "password": "{{:password!secret}}"
+}
+
+### API request with secret token
+GET https://api.example.com/data
+Authorization: Bearer {{:apiToken!secret}}
+```
+
+Secret inputs have special handling:
+- **Masked during entry**: Password-style input field (characters hidden)
+- **Masked in output**: Displayed as `<secret>` in CLI output and TUI summaries
+- **Stored securely**: Values are still saved to session files for `--use-cached` reuse
+- **Promotion**: If the same parameter appears both with and without `!secret`, the secret flag is applied to all occurrences
 
 **Supported Locations:**
 
 | Location              | URL Encoding | Example                                     |
 | --------------------- | ------------ | ------------------------------------------- |
 | URL                   | Yes          | `https://api.example.com/users/{{:userId}}` |
-| Header values         | No           | `Authorization: Bearer {{:token}}`          |
-| Request body          | No           | `{"username": "{{:username}}"}`             |
+| Header values         | No           | `Authorization: Bearer {{:token!secret}}`   |
+| Request body          | No           | `{"password": "{{:password!secret}}"}`      |
 | Multipart form fields | No           | Text field value: `{{:description}}`        |
 | Multipart file paths  | No           | `< {{:filePath}}`                           |
 
 **Features:**
 
 - **Interactive prompting**: Each run prompts for all parameters via a TUI form (default behavior)
+- **Secret inputs**: Use `{{:param!secret}}` for masked password-style input
 - **Session persistence**: Values are saved to session for optional reuse
 - **Use cached values**: Use `--use-cached` flag to skip prompting and reuse session values
 - **Unique per URL pattern**: Different endpoints maintain separate values
@@ -747,24 +774,24 @@ GET https://api.example.com/posts/{{:id}}
 ### Get posts with pagination (prompts for page and limit)
 GET https://api.example.com/posts?page={{:page}}&limit={{:limit}}
 
-### Authentication header (prompts for token, no encoding)
+### Authentication header (prompts for token, masked input, no URL encoding)
 GET https://api.example.com/protected
-Authorization: Bearer {{:apiToken}}
+Authorization: Bearer {{:apiToken!secret}}
 
-### JSON body (prompts for username and password)
+### JSON body (prompts for username and password, password is masked)
 POST https://api.example.com/login
 Content-Type: application/json
 
 {
   "username": "{{:username}}",
-  "password": "{{:password}}"
+  "password": "{{:password!secret}}"
 }
 
-### Form URL-encoded body
+### Form URL-encoded body (password is masked)
 POST https://api.example.com/login
 Content-Type: application/x-www-form-urlencoded
 
-username={{:username}}&password={{:password}}
+username={{:username}}&password={{:password!secret}}
 ```
 
 **Multipart Form Data Examples:**
@@ -828,6 +855,8 @@ restclient send api.http --name getPostById --use-cached
 
 - User input variables are processed **before** regular `{{varName}}` variables
 - Values are automatically URL-encoded when replaced in URLs (not in headers/body)
+- Use `{{:param!secret}}` for sensitive values - they are masked in the TUI and CLI output
+- Secret values are still stored in session files for `--use-cached` reuse
 - Session values are scoped per URL pattern (different endpoints have separate values)
 - Session values are cleared with `restclient session clear`
 - Use `--no-session` to disable session storage entirely

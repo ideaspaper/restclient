@@ -11,6 +11,7 @@ type ProcessResult struct {
 	Values   map[string]string // The values used for replacement (in order of appearance)
 	Patterns []Pattern         // The patterns that were found (preserves order)
 	Prompted bool              // Whether the user was prompted for values
+	Secrets  map[string]bool   // Which parameters are marked as secrets
 }
 
 // Prompter handles prompting users for input values with session integration.
@@ -46,17 +47,28 @@ func (p *Prompter) ProcessURL(url string) (*ProcessResult, error) {
 			Values:   nil,
 			Patterns: nil,
 			Prompted: false,
+			Secrets:  nil,
 		}, nil
 	}
 
 	// Generate session key for this URL pattern
 	urlKey := p.detector.GenerateKey(url)
 
-	// Get stored values from session
-	storedValues := make(map[string]string)
+	// Get stored entries from session
+	storedEntries := make(map[string]session.UserInputEntry)
 	if p.session != nil {
 		if stored := p.session.GetUserInputs(urlKey); stored != nil {
-			storedValues = stored
+			storedEntries = stored
+		}
+	}
+
+	// Build a map of which parameters are secrets (from patterns or stored entries)
+	secrets := make(map[string]bool)
+	for _, pattern := range patterns {
+		if pattern.IsSecret {
+			secrets[pattern.Name] = true
+		} else if entry, ok := storedEntries[pattern.Name]; ok && entry.IsSecret {
+			secrets[pattern.Name] = true
 		}
 	}
 
@@ -65,7 +77,7 @@ func (p *Prompter) ProcessURL(url string) (*ProcessResult, error) {
 	if !needPrompt {
 		// Check if any pattern is missing a value
 		for _, pattern := range patterns {
-			if _, ok := storedValues[pattern.Name]; !ok {
+			if _, ok := storedEntries[pattern.Name]; !ok {
 				needPrompt = true
 				break
 			}
@@ -77,9 +89,14 @@ func (p *Prompter) ProcessURL(url string) (*ProcessResult, error) {
 		// Build input fields for the form
 		fields := make([]tui.InputField, len(patterns))
 		for i, pattern := range patterns {
+			defaultVal := ""
+			if entry, ok := storedEntries[pattern.Name]; ok {
+				defaultVal = entry.Value
+			}
 			fields[i] = tui.InputField{
-				Name:    pattern.Name,
-				Default: storedValues[pattern.Name],
+				Name:     pattern.Name,
+				Default:  defaultVal,
+				IsSecret: secrets[pattern.Name],
 			}
 		}
 
@@ -90,13 +107,23 @@ func (p *Prompter) ProcessURL(url string) (*ProcessResult, error) {
 			return nil, err
 		}
 
-		// Save the new values to session
+		// Save the new values to session with secret metadata
 		if p.session != nil {
-			p.session.SetUserInputs(urlKey, values)
+			entries := make(map[string]session.UserInputEntry, len(values))
+			for k, v := range values {
+				entries[k] = session.UserInputEntry{
+					Value:    v,
+					IsSecret: secrets[k],
+				}
+			}
+			p.session.SetUserInputs(urlKey, entries)
 		}
 	} else {
 		// Use stored values
-		values = storedValues
+		values = make(map[string]string, len(storedEntries))
+		for k, entry := range storedEntries {
+			values[k] = entry.Value
+		}
 	}
 
 	// Replace patterns in URL
@@ -106,6 +133,7 @@ func (p *Prompter) ProcessURL(url string) (*ProcessResult, error) {
 		Values:   values,
 		Patterns: patterns,
 		Prompted: needPrompt,
+		Secrets:  secrets,
 	}, nil
 }
 
@@ -118,11 +146,21 @@ func (p *Prompter) ProcessContent(content string, urlKey string) (string, error)
 		return content, nil
 	}
 
-	// Get stored values from session
-	storedValues := make(map[string]string)
+	// Get stored entries from session
+	storedEntries := make(map[string]session.UserInputEntry)
 	if p.session != nil {
 		if stored := p.session.GetUserInputs(urlKey); stored != nil {
-			storedValues = stored
+			storedEntries = stored
+		}
+	}
+
+	// Build a map of which parameters are secrets (from patterns or stored entries)
+	secrets := make(map[string]bool)
+	for _, pattern := range patterns {
+		if pattern.IsSecret {
+			secrets[pattern.Name] = true
+		} else if entry, ok := storedEntries[pattern.Name]; ok && entry.IsSecret {
+			secrets[pattern.Name] = true
 		}
 	}
 
@@ -130,7 +168,7 @@ func (p *Prompter) ProcessContent(content string, urlKey string) (string, error)
 	needPrompt := p.forcePrompt
 	if !needPrompt {
 		for _, pattern := range patterns {
-			if _, ok := storedValues[pattern.Name]; !ok {
+			if _, ok := storedEntries[pattern.Name]; !ok {
 				needPrompt = true
 				break
 			}
@@ -141,9 +179,14 @@ func (p *Prompter) ProcessContent(content string, urlKey string) (string, error)
 	if needPrompt {
 		fields := make([]tui.InputField, len(patterns))
 		for i, pattern := range patterns {
+			defaultVal := ""
+			if entry, ok := storedEntries[pattern.Name]; ok {
+				defaultVal = entry.Value
+			}
 			fields[i] = tui.InputField{
-				Name:    pattern.Name,
-				Default: storedValues[pattern.Name],
+				Name:     pattern.Name,
+				Default:  defaultVal,
+				IsSecret: secrets[pattern.Name],
 			}
 		}
 
@@ -153,11 +196,23 @@ func (p *Prompter) ProcessContent(content string, urlKey string) (string, error)
 			return "", err
 		}
 
+		// Save the new values to session with secret metadata
 		if p.session != nil {
-			p.session.SetUserInputs(urlKey, values)
+			entries := make(map[string]session.UserInputEntry, len(values))
+			for k, v := range values {
+				entries[k] = session.UserInputEntry{
+					Value:    v,
+					IsSecret: secrets[k],
+				}
+			}
+			p.session.SetUserInputs(urlKey, entries)
 		}
 	} else {
-		values = storedValues
+		// Use stored values
+		values = make(map[string]string, len(storedEntries))
+		for k, entry := range storedEntries {
+			values[k] = entry.Value
+		}
 	}
 
 	// Use ReplaceRaw for content (headers, body, multipart) - no URL encoding needed

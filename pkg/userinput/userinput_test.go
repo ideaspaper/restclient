@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func buildPattern(name string, position int, secret bool) Pattern {
+	original := "{{:" + name + "}}"
+	if secret {
+		original = "{{:" + name + "!secret}}"
+	}
+	return Pattern{Name: name, Original: original, Position: position, IsSecret: secret}
+}
+
 func TestDetector_Detect(t *testing.T) {
 	tests := []struct {
 		name string
@@ -20,69 +28,76 @@ func TestDetector_Detect(t *testing.T) {
 			name: "single path parameter",
 			url:  "https://api.example.com/posts/{{:id}}",
 			want: []Pattern{
-				{Name: "id", Original: "{{:id}}", Position: 30},
+				buildPattern("id", 30, false),
 			},
 		},
 		{
 			name: "single query parameter",
 			url:  "https://api.example.com/posts?page={{:page}}",
 			want: []Pattern{
-				{Name: "page", Original: "{{:page}}", Position: 35},
+				buildPattern("page", 35, false),
 			},
 		},
 		{
 			name: "multiple query parameters",
 			url:  "https://api.example.com/posts?page={{:page}}&limit={{:limit}}",
 			want: []Pattern{
-				{Name: "page", Original: "{{:page}}", Position: 35},
-				{Name: "limit", Original: "{{:limit}}", Position: 51},
+				buildPattern("page", 35, false),
+				buildPattern("limit", 51, false),
 			},
 		},
 		{
 			name: "mixed path and query parameters",
 			url:  "https://api.example.com/users/{{:userId}}/posts?page={{:page}}",
 			want: []Pattern{
-				{Name: "userId", Original: "{{:userId}}", Position: 30},
-				{Name: "page", Original: "{{:page}}", Position: 53},
+				buildPattern("userId", 30, false),
+				buildPattern("page", 53, false),
 			},
 		},
 		{
 			name: "parameter with underscore",
 			url:  "https://api.example.com/users/{{:user_id}}",
 			want: []Pattern{
-				{Name: "user_id", Original: "{{:user_id}}", Position: 30},
+				buildPattern("user_id", 30, false),
 			},
 		},
 		{
 			name: "parameter with numbers",
 			url:  "https://api.example.com/items/{{:id1}}/{{:id2}}",
 			want: []Pattern{
-				{Name: "id1", Original: "{{:id1}}", Position: 30},
-				{Name: "id2", Original: "{{:id2}}", Position: 39},
+				buildPattern("id1", 30, false),
+				buildPattern("id2", 39, false),
 			},
 		},
 		{
 			name: "duplicate parameter names - only first returned",
 			url:  "https://api.example.com/users/{{:id}}/posts/{{:id}}",
 			want: []Pattern{
-				{Name: "id", Original: "{{:id}}", Position: 30},
+				buildPattern("id", 30, false),
+			},
+		},
+		{
+			name: "secret duplicate promotes secret",
+			url:  "https://api.example.com/users/{{:id}}/posts/{{:id!secret}}",
+			want: []Pattern{
+				buildPattern("id", 30, true),
 			},
 		},
 		{
 			name: "nested paths",
 			url:  "https://api.example.com/users/{{:userId}}/posts/{{:postId}}/comments/{{:commentId}}",
 			want: []Pattern{
-				{Name: "userId", Original: "{{:userId}}", Position: 30},
-				{Name: "postId", Original: "{{:postId}}", Position: 48},
-				{Name: "commentId", Original: "{{:commentId}}", Position: 69},
+				buildPattern("userId", 30, false),
+				buildPattern("postId", 48, false),
+				buildPattern("commentId", 69, false),
 			},
 		},
 		{
 			name: "URL with port",
 			url:  "http://localhost:8080/api/{{:resource}}/{{:id}}",
 			want: []Pattern{
-				{Name: "resource", Original: "{{:resource}}", Position: 26},
-				{Name: "id", Original: "{{:id}}", Position: 40},
+				buildPattern("resource", 26, false),
+				buildPattern("id", 40, false),
 			},
 		},
 		{
@@ -99,7 +114,14 @@ func TestDetector_Detect(t *testing.T) {
 			name: "mixed regular and user input variables",
 			url:  "{{baseUrl}}/posts/{{:id}}?api_key={{apiKey}}",
 			want: []Pattern{
-				{Name: "id", Original: "{{:id}}", Position: 18},
+				buildPattern("id", 18, false),
+			},
+		},
+		{
+			name: "secret duplicate promotes secret",
+			url:  "https://api.example.com/users/{{:id}}/posts/{{:id!secret}}",
+			want: []Pattern{
+				buildPattern("id", 30, true),
 			},
 		},
 	}
@@ -177,6 +199,31 @@ func TestDetector_Replace(t *testing.T) {
 			want:   "https://api.example.com/users/42/compare/42",
 		},
 		{
+			name:   "secret duplicate honors cache name",
+			url:    "https://api.example.com/users/{{:id}}/compare/{{:id!secret}}",
+			values: map[string]string{"id": "42"},
+			want:   "https://api.example.com/users/42/compare/42",
+		},
+		{
+			name:   "secret duplicate honors cache name",
+			url:    "https://api.example.com/users/{{:id}}/compare/{{:id!secret}}",
+			values: map[string]string{"id": "42"},
+			want:   "https://api.example.com/users/42/compare/42",
+		},
+		{
+			name:   "secret suffix replaced",
+			url:    "https://api.example.com/tokens/{{:token!secret}}",
+			values: map[string]string{"token": "shhh"},
+			want:   "https://api.example.com/tokens/shhh",
+		},
+		{
+			name:   "mixed secret and non-secret share value",
+			url:    "https://api.example.com/users/{{:id!secret}}/compare/{{:id}}",
+			values: map[string]string{"id": "42"},
+			want:   "https://api.example.com/users/42/compare/42",
+		},
+
+		{
 			name:   "value with special characters - URL encoded",
 			url:    "https://api.example.com/search?q={{:query}}",
 			values: map[string]string{"query": "hello world"},
@@ -238,6 +285,12 @@ func TestDetector_ReplaceRaw(t *testing.T) {
 			url:    "https://api.example.com/files/{{:path}}",
 			values: map[string]string{"path": "folder/file.txt"},
 			want:   "https://api.example.com/files/folder/file.txt",
+		},
+		{
+			name:   "secret suffix respected",
+			url:    "https://api.example.com/headers/{{:token!secret}}",
+			values: map[string]string{"token": "Bearer abc"},
+			want:   "https://api.example.com/headers/Bearer abc",
 		},
 	}
 
@@ -338,10 +391,11 @@ func TestDetector_Detect_EdgeCases(t *testing.T) {
 	detector := NewDetector()
 
 	tests := []struct {
-		name      string
-		url       string
-		wantCount int
-		wantNames []string
+		name       string
+		url        string
+		wantCount  int
+		wantNames  []string
+		wantSecret map[string]bool
 	}{
 		{
 			name:      "empty string",
@@ -452,10 +506,11 @@ func TestDetector_Detect_EdgeCases(t *testing.T) {
 			wantNames: []string{"id"},
 		},
 		{
-			name:      "multiple same patterns",
-			url:       "https://api.example.com/{{:id}}/{{:id}}/{{:id}}",
-			wantCount: 1,
-			wantNames: []string{"id"},
+			name:       "multiple same patterns",
+			url:        "https://api.example.com/{{:id}}/{{:id}}/{{:id}}",
+			wantCount:  1,
+			wantNames:  []string{"id"},
+			wantSecret: map[string]bool{"id": false},
 		},
 		{
 			name:      "pattern in query value only",
@@ -464,10 +519,11 @@ func TestDetector_Detect_EdgeCases(t *testing.T) {
 			wantNames: []string{"id", "name"},
 		},
 		{
-			name:      "Unicode in URL path with pattern",
-			url:       "https://api.example.com/用户/{{:userId}}/帖子",
-			wantCount: 1,
-			wantNames: []string{"userId"},
+			name:       "Unicode in URL path with pattern",
+			url:        "https://api.example.com/用户/{{:userId}}/帖子",
+			wantCount:  1,
+			wantNames:  []string{"userId"},
+			wantSecret: map[string]bool{"userId": false},
 		},
 	}
 
@@ -482,10 +538,17 @@ func TestDetector_Detect_EdgeCases(t *testing.T) {
 					if i < len(patterns) && patterns[i].Name != name {
 						t.Errorf("Detect() pattern[%d].Name = %v, want %v", i, patterns[i].Name, name)
 					}
+					if tt.wantSecret != nil {
+						expectedSecret := tt.wantSecret[name]
+						if patterns[i].IsSecret != expectedSecret {
+							t.Errorf("Detect() pattern[%d].IsSecret = %v, want %v", i, patterns[i].IsSecret, expectedSecret)
+						}
+					}
 				}
 			}
 		})
 	}
+
 }
 
 func TestDetector_Replace_EdgeCases(t *testing.T) {

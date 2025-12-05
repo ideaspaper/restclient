@@ -426,7 +426,11 @@ func processSessionInputs(request *models.HttpRequest, filePath string) error {
 		if !result.Prompted && len(result.Patterns) > 0 {
 			fmt.Println()
 			for _, pattern := range result.Patterns {
-				fmt.Printf("- %s: %s\n", pattern.Name, result.Values[pattern.Name])
+				value := result.Values[pattern.Name]
+				if result.Secrets[pattern.Name] {
+					value = "<secret>"
+				}
+				fmt.Printf("- %s: %s\n", pattern.Name, value)
 			}
 			fmt.Println()
 		}

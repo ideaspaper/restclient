@@ -41,14 +41,20 @@ type Cookie struct {
 	SameSite string    `json:"sameSite,omitempty"`
 }
 
+// UserInputEntry represents the persisted value and metadata for a user input prompt.
+type UserInputEntry struct {
+	Value    string `json:"value"`
+	IsSecret bool   `json:"isSecret,omitempty"`
+}
+
 // SessionManager manages session persistence (cookies and variables)
 type SessionManager struct {
 	fs          filesystem.FileSystem
 	baseDir     string
 	sessionPath string
-	cookies     map[string][]Cookie          // host -> cookies
-	variables   map[string]any               // variable name -> value
-	userInputs  map[string]map[string]string // urlKey -> paramName -> value
+	cookies     map[string][]Cookie                  // host -> cookies
+	variables   map[string]any                       // variable name -> value
+	userInputs  map[string]map[string]UserInputEntry // urlKey -> paramName -> entry
 }
 
 // NewSessionManager creates a new session manager
@@ -94,7 +100,7 @@ func NewSessionManagerWithFS(fs filesystem.FileSystem, baseDir, httpFilePath, se
 		sessionPath: sessionPath,
 		cookies:     make(map[string][]Cookie),
 		variables:   make(map[string]any),
-		userInputs:  make(map[string]map[string]string),
+		userInputs:  make(map[string]map[string]UserInputEntry),
 	}
 
 	return s, nil
@@ -487,13 +493,13 @@ func (s *SessionManager) SaveUserInputs() error {
 	return s.fs.WriteFile(path, data, 0644)
 }
 
-// GetUserInputs retrieves stored values for a URL pattern.
+// GetUserInputs retrieves stored entries for a URL pattern.
 // Returns nil if no values are stored for the given key.
-func (s *SessionManager) GetUserInputs(urlKey string) map[string]string {
-	if values, ok := s.userInputs[urlKey]; ok {
+func (s *SessionManager) GetUserInputs(urlKey string) map[string]UserInputEntry {
+	if entries, ok := s.userInputs[urlKey]; ok {
 		// Return a copy to prevent external modification
-		result := make(map[string]string, len(values))
-		for k, v := range values {
+		result := make(map[string]UserInputEntry, len(entries))
+		for k, v := range entries {
 			result[k] = v
 		}
 		return result
@@ -501,14 +507,14 @@ func (s *SessionManager) GetUserInputs(urlKey string) map[string]string {
 	return nil
 }
 
-// SetUserInputs stores values for a URL pattern.
-func (s *SessionManager) SetUserInputs(urlKey string, values map[string]string) {
+// SetUserInputs stores entries for a URL pattern.
+func (s *SessionManager) SetUserInputs(urlKey string, entries map[string]UserInputEntry) {
 	if s.userInputs == nil {
-		s.userInputs = make(map[string]map[string]string)
+		s.userInputs = make(map[string]map[string]UserInputEntry)
 	}
 	// Store a copy to prevent external modification
-	stored := make(map[string]string, len(values))
-	for k, v := range values {
+	stored := make(map[string]UserInputEntry, len(entries))
+	for k, v := range entries {
 		stored[k] = v
 	}
 	s.userInputs[urlKey] = stored
@@ -516,10 +522,10 @@ func (s *SessionManager) SetUserInputs(urlKey string, values map[string]string) 
 
 // ClearUserInputs clears all stored user input values.
 func (s *SessionManager) ClearUserInputs() {
-	s.userInputs = make(map[string]map[string]string)
+	s.userInputs = make(map[string]map[string]UserInputEntry)
 }
 
 // GetAllUserInputs returns all stored user input values.
-func (s *SessionManager) GetAllUserInputs() map[string]map[string]string {
+func (s *SessionManager) GetAllUserInputs() map[string]map[string]UserInputEntry {
 	return s.userInputs
 }

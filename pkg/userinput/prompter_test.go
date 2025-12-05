@@ -122,7 +122,7 @@ func TestPrompter_ProcessURL_WithStoredValues(t *testing.T) {
 
 	// Pre-populate session with values
 	urlKey := "api.example.com/posts/{{:id}}"
-	sm.SetUserInputs(urlKey, map[string]string{"id": "42"})
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{"id": {Value: "42"}})
 
 	p := NewPrompter(sm, false, false)
 
@@ -157,7 +157,7 @@ func TestPrompter_ProcessURL_WithMultipleStoredValues(t *testing.T) {
 
 	// Pre-populate session with values
 	urlKey := "api.example.com/users/{{:userId}}/posts/{{:postId}}"
-	sm.SetUserInputs(urlKey, map[string]string{"userId": "1", "postId": "99"})
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{"userId": {Value: "1"}, "postId": {Value: "99"}})
 
 	p := NewPrompter(sm, false, false)
 
@@ -203,7 +203,7 @@ func TestPrompter_ProcessContent_WithStoredValues(t *testing.T) {
 
 	// Pre-populate session with values
 	urlKey := "test-key"
-	sm.SetUserInputs(urlKey, map[string]string{"name": "John"})
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{"name": {Value: "John"}})
 
 	p := NewPrompter(sm, false, false)
 
@@ -245,7 +245,7 @@ func TestProcessResult_PatternsOrder(t *testing.T) {
 
 	// Pre-populate session with values
 	urlKey := "api.example.com/users/{{:userId}}/posts/{{:postId}}?page={{:page}}"
-	sm.SetUserInputs(urlKey, map[string]string{"userId": "1", "postId": "99", "page": "5"})
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{"userId": {Value: "1"}, "postId": {Value: "99"}, "page": {Value: "5"}})
 
 	p := NewPrompter(sm, false, false)
 
@@ -281,7 +281,7 @@ func TestProcessResult_ValuesMap(t *testing.T) {
 	}
 
 	urlKey := "api.example.com/posts/{{:id}}?limit={{:limit}}"
-	sm.SetUserInputs(urlKey, map[string]string{"id": "123", "limit": "10"})
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{"id": {Value: "123"}, "limit": {Value: "10"}})
 
 	p := NewPrompter(sm, false, false)
 
@@ -324,7 +324,7 @@ func TestProcessResult_PromptedFlag(t *testing.T) {
 
 	// Test 2: Patterns with stored values - Prompted should be false
 	urlKey := "api.example.com/posts/{{:id}}"
-	sm.SetUserInputs(urlKey, map[string]string{"id": "42"})
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{"id": {Value: "42"}})
 	url2 := "https://api.example.com/posts/{{:id}}"
 	result2, _ := p.ProcessURL(url2)
 	if result2.Prompted {
@@ -362,7 +362,7 @@ func TestProcessResult_URLCorrectlyProcessed(t *testing.T) {
 	tests := []struct {
 		name      string
 		urlKey    string
-		values    map[string]string
+		values    map[string]session.UserInputEntry
 		inputURL  string
 		wantURL   string
 		wantCount int
@@ -370,7 +370,7 @@ func TestProcessResult_URLCorrectlyProcessed(t *testing.T) {
 		{
 			name:      "single path parameter",
 			urlKey:    "api.example.com/posts/{{:id}}",
-			values:    map[string]string{"id": "42"},
+			values:    map[string]session.UserInputEntry{"id": {Value: "42"}},
 			inputURL:  "https://api.example.com/posts/{{:id}}",
 			wantURL:   "https://api.example.com/posts/42",
 			wantCount: 1,
@@ -378,7 +378,7 @@ func TestProcessResult_URLCorrectlyProcessed(t *testing.T) {
 		{
 			name:      "multiple path parameters",
 			urlKey:    "api.example.com/users/{{:userId}}/posts/{{:postId}}",
-			values:    map[string]string{"userId": "1", "postId": "99"},
+			values:    map[string]session.UserInputEntry{"userId": {Value: "1"}, "postId": {Value: "99"}},
 			inputURL:  "https://api.example.com/users/{{:userId}}/posts/{{:postId}}",
 			wantURL:   "https://api.example.com/users/1/posts/99",
 			wantCount: 2,
@@ -386,7 +386,7 @@ func TestProcessResult_URLCorrectlyProcessed(t *testing.T) {
 		{
 			name:      "query parameters",
 			urlKey:    "api.example.com/posts?page={{:page}}&limit={{:limit}}",
-			values:    map[string]string{"page": "1", "limit": "10"},
+			values:    map[string]session.UserInputEntry{"page": {Value: "1"}, "limit": {Value: "10"}},
 			inputURL:  "https://api.example.com/posts?page={{:page}}&limit={{:limit}}",
 			wantURL:   "https://api.example.com/posts?page=1&limit=10",
 			wantCount: 2,
@@ -394,7 +394,7 @@ func TestProcessResult_URLCorrectlyProcessed(t *testing.T) {
 		{
 			name:      "mixed path and query",
 			urlKey:    "api.example.com/posts/{{:id}}?format={{:format}}",
-			values:    map[string]string{"id": "123", "format": "json"},
+			values:    map[string]session.UserInputEntry{"id": {Value: "123"}, "format": {Value: "json"}},
 			inputURL:  "https://api.example.com/posts/{{:id}}?format={{:format}}",
 			wantURL:   "https://api.example.com/posts/123?format=json",
 			wantCount: 2,
@@ -402,7 +402,7 @@ func TestProcessResult_URLCorrectlyProcessed(t *testing.T) {
 		{
 			name:      "duplicate parameter name",
 			urlKey:    "api.example.com/posts/{{:id}}/related/{{:id}}",
-			values:    map[string]string{"id": "42"},
+			values:    map[string]session.UserInputEntry{"id": {Value: "42"}},
 			inputURL:  "https://api.example.com/posts/{{:id}}/related/{{:id}}",
 			wantURL:   "https://api.example.com/posts/42/related/42",
 			wantCount: 1, // Unique patterns only
@@ -441,7 +441,7 @@ func TestProcessResult_EmptyValues(t *testing.T) {
 
 	// Test with empty string value
 	urlKey := "api.example.com/posts/{{:id}}"
-	sm.SetUserInputs(urlKey, map[string]string{"id": ""})
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{"id": {Value: ""}})
 
 	p := NewPrompter(sm, false, false)
 
@@ -472,10 +472,10 @@ func TestPrompter_ProcessContent_MultipartFieldValues(t *testing.T) {
 
 	// Pre-populate session with values
 	urlKey := "api.example.com/upload"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"username":    "john_doe",
-		"description": "My file",
-		"tag":         "important",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"username":    {Value: "john_doe"},
+		"description": {Value: "My file"},
+		"tag":         {Value: "important"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -531,10 +531,10 @@ func TestPrompter_ProcessContent_SharedValuesAcrossFields(t *testing.T) {
 
 	// Pre-populate session with values - simulating values used across URL, headers, body, and multipart
 	urlKey := "api.example.com/users/{{:userId}}"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"userId":   "42",
-		"username": "john",
-		"token":    "abc123",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"userId":   {Value: "42"},
+		"username": {Value: "john"},
+		"token":    {Value: "abc123"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -592,8 +592,8 @@ func TestPrompter_ProcessContent_PatternInHeaderButNotInURL(t *testing.T) {
 
 	// URL has no patterns, but we store values for headers
 	urlKey := "api.example.com/profile"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"token": "secret-token-123",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"token": {Value: "secret-token-123"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -632,9 +632,9 @@ func TestPrompter_ProcessContent_PatternInBodyButNotInURL(t *testing.T) {
 
 	// URL has no patterns, but we store values for body
 	urlKey := "api.example.com/login"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"username": "admin",
-		"password": "secret",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"username": {Value: "admin"},
+		"password": {Value: "secret"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -662,8 +662,8 @@ func TestPrompter_SameParameterSharedAcrossURLAndHeaders(t *testing.T) {
 
 	// Same parameter name used in both URL and header
 	urlKey := "api.example.com/users/{{:id}}"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"id": "42",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"id": {Value: "42"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -707,8 +707,8 @@ func TestPrompter_EmptyStringValue(t *testing.T) {
 
 	// Use the correct URL key that matches what GenerateKey would produce
 	urlKey := "api.example.com/search?q={{:query}}"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"query": "", // Empty string
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"query": {Value: ""}, // Empty string
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -796,7 +796,7 @@ func TestPrompter_SpecialCharactersInBody(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sm.SetUserInputs(urlKey, map[string]string{"msg": tt.value})
+			sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{"msg": {Value: tt.value}})
 			p := NewPrompter(sm, false, false)
 
 			result, err := p.ProcessContent(tt.body, urlKey)
@@ -820,8 +820,8 @@ func TestPrompter_ContentTypeHeaderWithPattern(t *testing.T) {
 	}
 
 	urlKey := "api.example.com/upload"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"contentType": "application/json",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"contentType": {Value: "application/json"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -847,8 +847,8 @@ func TestPrompter_URLEncodingVsRawReplacement(t *testing.T) {
 
 	urlKey := "api.example.com/test/{{:value}}"
 	valueWithSpaces := "hello world"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"value": valueWithSpaces,
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"value": {Value: valueWithSpaces},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -894,8 +894,8 @@ func TestPrompter_DifferentSessionKeysForDifferentURLs(t *testing.T) {
 	urlKey1 := "api.example.com/users/{{:id}}"
 	urlKey2 := "api.example.com/posts/{{:id}}"
 
-	sm.SetUserInputs(urlKey1, map[string]string{"id": "user-42"})
-	sm.SetUserInputs(urlKey2, map[string]string{"id": "post-99"})
+	sm.SetUserInputs(urlKey1, map[string]session.UserInputEntry{"id": {Value: "user-42"}})
+	sm.SetUserInputs(urlKey2, map[string]session.UserInputEntry{"id": {Value: "post-99"}})
 
 	p := NewPrompter(sm, false, false)
 
@@ -928,8 +928,8 @@ func TestPrompter_MultiplePatternsSameNameInContent(t *testing.T) {
 	}
 
 	urlKey := "api.example.com/test"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"id": "123",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"id": {Value: "123"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -956,9 +956,9 @@ func TestPrompter_FormURLEncodedBody(t *testing.T) {
 	}
 
 	urlKey := "api.example.com/login"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"username": "john",
-		"password": "secret123",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"username": {Value: "john"},
+		"password": {Value: "secret123"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -985,9 +985,9 @@ func TestPrompter_MultipartFieldValue(t *testing.T) {
 	}
 
 	urlKey := "api.example.com/upload"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"description": "My awesome file",
-		"tags":        "important,urgent",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"description": {Value: "My awesome file"},
+		"tags":        {Value: "important,urgent"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -1020,8 +1020,8 @@ func TestPrompter_MultipartFilePath(t *testing.T) {
 	}
 
 	urlKey := "api.example.com/upload"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"filePath": "/home/user/documents/report.pdf",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"filePath": {Value: "/home/user/documents/report.pdf"},
 	})
 
 	p := NewPrompter(sm, false, false)
@@ -1046,8 +1046,8 @@ func TestPrompter_MultipartFilePathWithSpaces(t *testing.T) {
 	}
 
 	urlKey := "api.example.com/upload"
-	sm.SetUserInputs(urlKey, map[string]string{
-		"filePath": "/home/user/My Documents/report.pdf",
+	sm.SetUserInputs(urlKey, map[string]session.UserInputEntry{
+		"filePath": {Value: "/home/user/My Documents/report.pdf"},
 	})
 
 	p := NewPrompter(sm, false, false)
