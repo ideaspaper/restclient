@@ -17,6 +17,7 @@ type testItem struct {
 func (t testItem) FilterValue() string { return t.filterValue }
 func (t testItem) Title() string       { return t.title }
 func (t testItem) Description() string { return t.description }
+func (t testItem) String() string      { return t.title + "  " + t.description }
 
 func TestNewModel(t *testing.T) {
 	items := []Item{

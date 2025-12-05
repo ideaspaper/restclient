@@ -41,6 +41,11 @@ func (h HistoryItem) Description() string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
+// String returns formatted string for display: [index] title  description
+func (h HistoryItem) String() string {
+	return fmt.Sprintf("[%d] %s  %s", h.Index+1, h.Title(), h.Description())
+}
+
 // historyCmd represents the history command
 var historyCmd = &cobra.Command{
 	Use:   "history",

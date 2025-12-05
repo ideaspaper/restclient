@@ -21,6 +21,8 @@ type Item interface {
 	Title() string
 	// Description returns secondary text (displayed dimmed)
 	Description() string
+	// String returns formatted string for display: [index] title  description
+	String() string
 }
 
 // Styles holds the styling configuration for the selector
@@ -285,12 +287,8 @@ func (m Model) View() string {
 
 	// If selection is done (either selected or cancelled), show final state
 	if m.selected != nil {
-		// Show just the selected item (no prompt)
-		b.WriteString(fmt.Sprintf("[%d] %s", m.selectedIndex+1, m.selected.Title()))
-		if desc := m.selected.Description(); desc != "" {
-			b.WriteString("  ")
-			b.WriteString(m.styles.Description.Render(desc))
-		}
+		// Show just the selected item using its String() method
+		b.WriteString(m.selected.String())
 		b.WriteString("\n")
 		return b.String()
 	}

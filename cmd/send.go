@@ -57,6 +57,11 @@ func (r RequestItem) Description() string {
 	return name
 }
 
+// String returns formatted string for display: [index] title  description
+func (r RequestItem) String() string {
+	return fmt.Sprintf("[%d] %s  %s", r.Index+1, r.Title(), r.Description())
+}
+
 var (
 	requestName  string
 	requestIndex int
@@ -247,22 +252,29 @@ func runSend(cmd *cobra.Command, args []string) error {
 	}
 
 	var request *models.HttpRequest
+	var selectedIndex int
 	if requestName != "" {
-		for _, req := range requests {
+		for i, req := range requests {
 			if req.Name == requestName || req.Metadata.Name == requestName {
 				request = req
+				selectedIndex = i
 				break
 			}
 		}
 		if request == nil {
 			return errors.NewValidationErrorWithValue("request name", requestName, "request not found")
 		}
+		item := RequestItem{Request: request, Index: selectedIndex}
+		fmt.Printf("\n%s\n", item.String())
 	} else if cmd.Flags().Changed("index") {
 		internalIndex := requestIndex - 1
 		if internalIndex < 0 || internalIndex >= len(requests) {
 			return errors.NewValidationErrorWithValue("request index", fmt.Sprintf("%d", requestIndex), fmt.Sprintf("out of range (1-%d)", len(requests)))
 		}
 		request = requests[internalIndex]
+		selectedIndex = internalIndex
+		item := RequestItem{Request: request, Index: selectedIndex}
+		fmt.Printf("\n%s\n", item.String())
 	} else {
 		if len(requests) > 1 {
 			request, err = selectRequest(requests)
@@ -318,6 +330,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 			// Print user input values if not prompted (TUI already prints them when prompted)
 			if !result.Prompted && len(result.Patterns) > 0 {
+				fmt.Println()
 				for _, pattern := range result.Patterns {
 					fmt.Printf("- %s: %s\n", pattern.Name, result.Values[pattern.Name])
 				}
