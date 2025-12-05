@@ -81,7 +81,6 @@ func sendRequest(httpFilePath string, request *models.HttpRequest, cfg *config.C
 
 	// Print test results if any
 	if len(result.TestResults) > 0 {
-		fmt.Println()
 		printTestResults(result.TestResults)
 	}
 
@@ -99,6 +98,7 @@ func printTestResults(tests []scripting.TestResult) {
 			printTestFail(test.Name, test.Error)
 		}
 	}
+	fmt.Println()
 }
 
 // displayResponse formats and displays an HTTP response
