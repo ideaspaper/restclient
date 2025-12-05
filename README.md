@@ -148,6 +148,7 @@ restclient send [file.http] [flags]
 | `--session` | | Use a named session instead of directory-based |
 | `--no-session` | | Don't load or save session state |
 | `--strict` | | Error on duplicate `@name` values instead of warning |
+| `--force-prompt` | `-p` | Force prompting for user input values (`{{:paramName}}`) |
 
 **Examples:**
 
@@ -700,6 +701,71 @@ Prefix with `%` to URL-encode a variable:
 ```http
 GET https://api.example.com/search?q={{%searchTerm}}
 ```
+
+### User Input Variables
+
+User input variables use the `{{:paramName}}` syntax and are ideal for dynamic path parameters and query parameters. On first use, you'll be prompted to enter values. These values are persisted in your session and reused automatically on subsequent requests.
+
+**Syntax:**
+
+```http
+### Get post by ID
+GET https://api.example.com/posts/{{:id}}
+
+### Get posts with pagination
+GET https://api.example.com/posts?page={{:page}}&limit={{:limit}}
+```
+
+**Features:**
+
+- **Interactive prompting**: First run prompts for all undefined parameters via a TUI form
+- **Session persistence**: Values are saved and reused automatically
+- **Force re-prompting**: Use `--force-prompt` or `-p` flag to re-enter values
+- **Unique per URL pattern**: Different endpoints maintain separate values
+- **Duplicate handling**: Same parameter name used multiple times prompts once
+
+**Examples:**
+
+```bash
+# First run - prompts for :id value
+restclient send api.http --name getPostById
+# Enter value for id: 123
+
+# Second run - uses cached value (id=123)
+restclient send api.http --name getPostById
+
+# Force re-prompting to change values
+restclient send api.http --name getPostById --force-prompt
+# Enter value for id: 456
+```
+
+**Request File Example:**
+
+```http
+@baseUrl = https://jsonplaceholder.typicode.com
+
+### Get post by ID (prompts for id)
+# @name getPostById
+GET {{baseUrl}}/posts/{{:id}}
+Accept: application/json
+
+### Get posts with pagination (prompts for page and limit)
+# @name getPostsPaginated
+GET {{baseUrl}}/posts?_page={{:page}}&_limit={{:limit}}
+Accept: application/json
+
+### Get comments for a post (prompts for postId)
+# @name getCommentsForPost
+GET {{baseUrl}}/posts/{{:postId}}/comments
+Accept: application/json
+```
+
+**Notes:**
+
+- User input variables are processed **before** regular `{{varName}}` variables
+- Values are automatically URL-encoded when replaced in URLs
+- Session values are cleared with `restclient session clear`
+- Use `--no-session` to disable session storage (always prompts)
 
 ## Scripting
 

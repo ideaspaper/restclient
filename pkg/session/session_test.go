@@ -454,3 +454,158 @@ func TestCookieWithPort(t *testing.T) {
 		t.Errorf("GetCookiesForURL() returned %d cookies, want 1", len(cookies))
 	}
 }
+
+func TestSessionManager_UserInputs(t *testing.T) {
+	tempDir := t.TempDir()
+
+	sm, err := NewSessionManager(tempDir, "", "test-user-inputs")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// Test SetUserInputs and GetUserInputs
+	values := map[string]string{
+		"id":   "123",
+		"page": "1",
+	}
+	urlKey := "api.example.com/posts/{{:id}}?page={{:page}}"
+	sm.SetUserInputs(urlKey, values)
+
+	// Test GetUserInputs
+	retrieved := sm.GetUserInputs(urlKey)
+	if retrieved == nil {
+		t.Fatal("GetUserInputs() should return stored values")
+	}
+	if retrieved["id"] != "123" {
+		t.Errorf("GetUserInputs()[id] = %v, want %v", retrieved["id"], "123")
+	}
+	if retrieved["page"] != "1" {
+		t.Errorf("GetUserInputs()[page] = %v, want %v", retrieved["page"], "1")
+	}
+
+	// Test non-existent key
+	noValues := sm.GetUserInputs("non-existent-key")
+	if noValues != nil {
+		t.Error("GetUserInputs() should return nil for non-existent key")
+	}
+
+	// Test GetAllUserInputs
+	allInputs := sm.GetAllUserInputs()
+	if len(allInputs) != 1 {
+		t.Errorf("GetAllUserInputs() length = %d, want %d", len(allInputs), 1)
+	}
+
+	// Test ClearUserInputs
+	sm.ClearUserInputs()
+	allInputs = sm.GetAllUserInputs()
+	if len(allInputs) != 0 {
+		t.Errorf("After ClearUserInputs(), GetAllUserInputs() length = %d, want %d", len(allInputs), 0)
+	}
+}
+
+func TestSessionManager_UserInputsPersistence(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create and populate first session manager
+	sm1, err := NewSessionManager(tempDir, "", "test-user-inputs-persist")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	values := map[string]string{
+		"userId": "42",
+		"postId": "99",
+	}
+	urlKey := "api.example.com/users/{{:userId}}/posts/{{:postId}}"
+	sm1.SetUserInputs(urlKey, values)
+
+	// Save to disk
+	if err := sm1.Save(); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// Create new session manager and load
+	sm2, err := NewSessionManager(tempDir, "", "test-user-inputs-persist")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	if err := sm2.Load(); err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Verify user inputs persisted
+	retrieved := sm2.GetUserInputs(urlKey)
+	if retrieved == nil {
+		t.Fatal("After Load(), GetUserInputs() should return stored values")
+	}
+	if retrieved["userId"] != "42" {
+		t.Errorf("After Load(), GetUserInputs()[userId] = %v, want %v", retrieved["userId"], "42")
+	}
+	if retrieved["postId"] != "99" {
+		t.Errorf("After Load(), GetUserInputs()[postId] = %v, want %v", retrieved["postId"], "99")
+	}
+}
+
+func TestSessionManager_UserInputsMultipleURLs(t *testing.T) {
+	tempDir := t.TempDir()
+
+	sm, err := NewSessionManager(tempDir, "", "test-user-inputs-multi")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// Store inputs for multiple URL patterns
+	sm.SetUserInputs("api.example.com/users/{{:id}}", map[string]string{"id": "1"})
+	sm.SetUserInputs("api.example.com/posts/{{:id}}", map[string]string{"id": "2"})
+	sm.SetUserInputs("other.example.com/items/{{:id}}", map[string]string{"id": "3"})
+
+	// Verify each URL key has its own values
+	if v := sm.GetUserInputs("api.example.com/users/{{:id}}"); v["id"] != "1" {
+		t.Errorf("Users endpoint id = %v, want %v", v["id"], "1")
+	}
+	if v := sm.GetUserInputs("api.example.com/posts/{{:id}}"); v["id"] != "2" {
+		t.Errorf("Posts endpoint id = %v, want %v", v["id"], "2")
+	}
+	if v := sm.GetUserInputs("other.example.com/items/{{:id}}"); v["id"] != "3" {
+		t.Errorf("Other API id = %v, want %v", v["id"], "3")
+	}
+
+	// Verify total count
+	allInputs := sm.GetAllUserInputs()
+	if len(allInputs) != 3 {
+		t.Errorf("GetAllUserInputs() length = %d, want %d", len(allInputs), 3)
+	}
+}
+
+func TestSessionManager_UserInputsCopyOnReadWrite(t *testing.T) {
+	tempDir := t.TempDir()
+
+	sm, err := NewSessionManager(tempDir, "", "test-user-inputs-copy")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// Set initial values
+	urlKey := "api.example.com/posts/{{:id}}"
+	original := map[string]string{"id": "123"}
+	sm.SetUserInputs(urlKey, original)
+
+	// Modify the original map after setting
+	original["id"] = "999"
+
+	// Verify stored values are not affected
+	retrieved := sm.GetUserInputs(urlKey)
+	if retrieved["id"] != "123" {
+		t.Error("SetUserInputs should copy values, not store reference")
+	}
+
+	// Modify retrieved map
+	retrieved["id"] = "888"
+
+	// Verify stored values are not affected
+	retrieved2 := sm.GetUserInputs(urlKey)
+	if retrieved2["id"] != "123" {
+		t.Error("GetUserInputs should return copy, not reference")
+	}
+}

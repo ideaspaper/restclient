@@ -21,7 +21,9 @@ import (
 	"github.com/ideaspaper/restclient/pkg/lastfile"
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/parser"
+	"github.com/ideaspaper/restclient/pkg/session"
 	"github.com/ideaspaper/restclient/pkg/tui"
+	"github.com/ideaspaper/restclient/pkg/userinput"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
 
@@ -67,6 +69,7 @@ var (
 	sessionName  string
 	noSession    bool
 	strictMode   bool
+	forcePrompt  bool
 )
 
 // sendCmd represents the send command
@@ -120,6 +123,7 @@ func init() {
 	sendCmd.Flags().StringVar(&sessionName, "session", "", "use named session instead of directory-based session")
 	sendCmd.Flags().BoolVar(&noSession, "no-session", false, "don't load or save session state (cookies and variables)")
 	sendCmd.Flags().BoolVar(&strictMode, "strict", false, "error on duplicate @name values instead of warning")
+	sendCmd.Flags().BoolVarP(&forcePrompt, "force-prompt", "p", false, "force prompting for user input values ({{:paramName}})")
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -271,6 +275,59 @@ func runSend(cmd *cobra.Command, args []string) error {
 			fmt.Println() // Blank line after selection
 		} else {
 			request = requests[0]
+		}
+	}
+
+	// Display request-level parsing warnings (e.g., unknown method, malformed headers, missing files)
+	if len(request.Warnings) > 0 {
+		for _, w := range request.Warnings {
+			if useColors() {
+				warnColor.Fprintf(os.Stderr, "Warning: %s\n", w)
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
+			}
+		}
+		fmt.Fprintln(os.Stderr)
+	}
+
+	// Process user input variables ({{:paramName}}) before other variable processing
+	if !noSession {
+		sessionMgr, err := session.NewSessionManager("", filePath, sessionName)
+		if err != nil {
+			return errors.Wrap(err, "failed to create session manager")
+		}
+		if err := sessionMgr.Load(); err != nil {
+			// Log warning but continue - session may not exist yet
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to load session: %v\n", err)
+			}
+		}
+
+		inputPrompter := userinput.NewPrompter(sessionMgr, forcePrompt, useColors())
+		if inputPrompter.HasPatterns(request.URL) {
+			result, err := inputPrompter.ProcessURL(request.URL)
+			if err != nil {
+				if errors.Is(err, errors.ErrCanceled) {
+					return nil
+				}
+				return errors.Wrap(err, "failed to process user input variables")
+			}
+			request.URL = result.URL
+
+			// Print user input values if not prompted (TUI already prints them when prompted)
+			if !result.Prompted && len(result.Patterns) > 0 {
+				for _, pattern := range result.Patterns {
+					fmt.Printf("- %s: %s\n", pattern.Name, result.Values[pattern.Name])
+				}
+				fmt.Println()
+			}
+
+			// Save session with new user input values
+			if err := sessionMgr.Save(); err != nil {
+				if verbose {
+					fmt.Fprintf(os.Stderr, "Warning: failed to save session: %v\n", err)
+				}
+			}
 		}
 	}
 

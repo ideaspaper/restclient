@@ -77,12 +77,12 @@ func TestParseRequestLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			method, url := parseRequestLine(tt.input)
-			if method != tt.wantMethod {
-				t.Errorf("parseRequestLine() method = %v, want %v", method, tt.wantMethod)
+			result := parseRequestLine(tt.input)
+			if result.Method != tt.wantMethod {
+				t.Errorf("parseRequestLine() method = %v, want %v", result.Method, tt.wantMethod)
 			}
-			if url != tt.wantURL {
-				t.Errorf("parseRequestLine() url = %v, want %v", url, tt.wantURL)
+			if result.URL != tt.wantURL {
+				t.Errorf("parseRequestLine() url = %v, want %v", result.URL, tt.wantURL)
 			}
 		})
 	}
@@ -1590,5 +1590,685 @@ GET https://api.example.com`,
 				t.Errorf("Note = %q, want %q", req.Metadata.Note, tt.wantNote)
 			}
 		})
+	}
+}
+
+func TestUnknownHTTPMethodWarning(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantMethod   string
+		wantWarning  bool
+		wantContains string
+	}{
+		{
+			name:        "valid GET method",
+			input:       "GET https://api.example.com/users",
+			wantMethod:  "GET",
+			wantWarning: false,
+		},
+		{
+			name:        "valid POST method",
+			input:       "POST https://api.example.com/users",
+			wantMethod:  "POST",
+			wantWarning: false,
+		},
+		{
+			name:         "unknown DELET method (typo)",
+			input:        "DELET https://api.example.com/users",
+			wantMethod:   "GET",
+			wantWarning:  true,
+			wantContains: "unknown HTTP method 'DELET'",
+		},
+		{
+			name:         "unknown POSTT method (typo)",
+			input:        "POSTT https://api.example.com/users",
+			wantMethod:   "GET",
+			wantWarning:  true,
+			wantContains: "unknown HTTP method 'POSTT'",
+		},
+		{
+			name:        "URL only (no method)",
+			input:       "https://api.example.com/users",
+			wantMethod:  "GET",
+			wantWarning: false, // No warning because there's no invalid method, just defaulting to GET
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewHttpRequestParser(tt.input, nil, "")
+			req, err := parser.ParseRequest(tt.input)
+			if err != nil {
+				t.Fatalf("ParseRequest() error = %v", err)
+			}
+
+			if req.Method != tt.wantMethod {
+				t.Errorf("Method = %v, want %v", req.Method, tt.wantMethod)
+			}
+
+			hasWarning := len(req.Warnings) > 0
+			if hasWarning != tt.wantWarning {
+				t.Errorf("hasWarning = %v, want %v (warnings: %v)", hasWarning, tt.wantWarning, req.Warnings)
+			}
+
+			if tt.wantContains != "" {
+				found := false
+				for _, w := range req.Warnings {
+					if strings.Contains(w, tt.wantContains) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q, got: %v", tt.wantContains, req.Warnings)
+				}
+			}
+		})
+	}
+}
+
+func TestMalformedHeaderWarning(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantWarning  bool
+		wantContains string
+	}{
+		{
+			name: "valid headers",
+			input: `GET https://api.example.com/users
+Content-Type: application/json
+Authorization: Bearer token`,
+			wantWarning: false,
+		},
+		{
+			name: "header without colon",
+			input: `GET https://api.example.com/users
+Authorization Bearer token`,
+			wantWarning:  true,
+			wantContains: "malformed header 'Authorization Bearer token'",
+		},
+		{
+			name: "multiple malformed headers",
+			input: `GET https://api.example.com/users
+Content-Type application/json
+Authorization Bearer token`,
+			wantWarning:  true,
+			wantContains: "malformed header",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewHttpRequestParser(tt.input, nil, "")
+			req, err := parser.ParseRequest(tt.input)
+			if err != nil {
+				t.Fatalf("ParseRequest() error = %v", err)
+			}
+
+			hasWarning := len(req.Warnings) > 0
+			if hasWarning != tt.wantWarning {
+				t.Errorf("hasWarning = %v, want %v (warnings: %v)", hasWarning, tt.wantWarning, req.Warnings)
+			}
+
+			if tt.wantContains != "" {
+				found := false
+				for _, w := range req.Warnings {
+					if strings.Contains(w, tt.wantContains) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q, got: %v", tt.wantContains, req.Warnings)
+				}
+			}
+		})
+	}
+}
+
+func TestMissingFileReferenceWarning(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantWarning  bool
+		wantContains string
+	}{
+		{
+			name: "inline body (no file reference)",
+			input: `POST https://api.example.com/users
+Content-Type: application/json
+
+{"name": "John"}`,
+			wantWarning: false,
+		},
+		{
+			name: "missing file reference",
+			input: `POST https://api.example.com/users
+Content-Type: application/json
+
+< ./nonexistent-file.json`,
+			wantWarning:  true,
+			wantContains: "file reference './nonexistent-file.json' could not be read",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewHttpRequestParser(tt.input, nil, "/nonexistent-base-dir")
+			req, err := parser.ParseRequest(tt.input)
+			if err != nil {
+				t.Fatalf("ParseRequest() error = %v", err)
+			}
+
+			hasWarning := len(req.Warnings) > 0
+			if hasWarning != tt.wantWarning {
+				t.Errorf("hasWarning = %v, want %v (warnings: %v)", hasWarning, tt.wantWarning, req.Warnings)
+			}
+
+			if tt.wantContains != "" {
+				found := false
+				for _, w := range req.Warnings {
+					if strings.Contains(w, tt.wantContains) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected warning containing %q, got: %v", tt.wantContains, req.Warnings)
+				}
+			}
+		})
+	}
+}
+
+func TestCombinedWarnings(t *testing.T) {
+	// Test that multiple warnings can be collected for a single request
+	input := `DELET https://api.example.com/users
+Authorization Bearer token
+Content-Type: application/json
+
+< ./nonexistent.json`
+
+	parser := NewHttpRequestParser(input, nil, "/nonexistent-base-dir")
+	req, err := parser.ParseRequest(input)
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	// Should have at least 3 warnings: unknown method, malformed header, missing file
+	if len(req.Warnings) < 3 {
+		t.Errorf("Expected at least 3 warnings, got %d: %v", len(req.Warnings), req.Warnings)
+	}
+
+	// Check for each expected warning type
+	expectedWarnings := []string{
+		"unknown HTTP method",
+		"malformed header",
+		"file reference",
+	}
+
+	for _, expected := range expectedWarnings {
+		found := false
+		for _, w := range req.Warnings {
+			if strings.Contains(w, expected) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected warning containing %q not found in: %v", expected, req.Warnings)
+		}
+	}
+}
+
+// TestScriptParsingEdgeCases tests edge cases for pre-request and post-response script parsing
+func TestScriptParsingEdgeCases(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		wantPreScript  string
+		wantPostScript string
+		wantBody       string
+		wantErr        bool
+	}{
+		{
+			name: "empty pre-script block",
+			input: `< {%
+%}
+GET https://api.example.com/users`,
+			wantPreScript:  "",
+			wantPostScript: "",
+		},
+		{
+			name: "empty post-script block",
+			input: `GET https://api.example.com/users
+
+> {%
+%}`,
+			wantPreScript:  "",
+			wantPostScript: "",
+		},
+		{
+			name: "script with only whitespace",
+			input: `< {%
+   
+%}
+GET https://api.example.com/users`,
+			wantPreScript:  "   ",
+			wantPostScript: "",
+		},
+		{
+			name: "script with special characters",
+			input: `GET https://api.example.com/users
+
+> {%
+var regex = /test\s+pattern/g;
+var str = "hello \"world\"";
+var obj = { key: 'value' };
+%}`,
+			wantPreScript:  "",
+			wantPostScript: "var regex = /test\\s+pattern/g;\nvar str = \"hello \\\"world\\\"\";\nvar obj = { key: 'value' };",
+		},
+		{
+			name: "script with percent sign in content",
+			input: `GET https://api.example.com/users
+
+> {%
+var progress = 50;
+client.log("Progress: " + progress + "%");
+%}`,
+			wantPreScript:  "",
+			wantPostScript: "var progress = 50;\nclient.log(\"Progress: \" + progress + \"%\");",
+		},
+		{
+			name: "script with nested braces",
+			input: `GET https://api.example.com/users
+
+> {%
+if (response.status === 200) {
+    var data = { nested: { value: 1 } };
+    client.log(JSON.stringify(data));
+}
+%}`,
+			wantPreScript:  "",
+			wantPostScript: "if (response.status === 200) {\n    var data = { nested: { value: 1 } };\n    client.log(JSON.stringify(data));\n}",
+		},
+		{
+			name: "multiple pre-scripts concatenated",
+			input: `< {%
+var a = 1;
+%}
+< {%
+var b = 2;
+%}
+GET https://api.example.com/users`,
+			wantPreScript:  "var a = 1;\nvar b = 2;",
+			wantPostScript: "",
+		},
+		{
+			name: "multiple post-scripts concatenated",
+			input: `GET https://api.example.com/users
+
+> {%
+client.log("first");
+%}
+> {%
+client.log("second");
+%}`,
+			wantPreScript:  "",
+			wantPostScript: "client.log(\"first\");\nclient.log(\"second\");",
+		},
+		{
+			name: "script with closing marker on same line as content",
+			input: `GET https://api.example.com/users
+
+> {%
+client.log("test"); %}`,
+			wantPreScript:  "",
+			wantPostScript: "client.log(\"test\"); ", // trailing space before %}
+		},
+		{
+			name: "script immediately after headers no blank line",
+			input: `GET https://api.example.com/users
+Accept: application/json
+> {%
+client.log("test");
+%}`,
+			wantPreScript:  "",
+			wantPostScript: "client.log(\"test\");", // parsed as script, not body
+		},
+		{
+			name: "pre-script with metadata before it",
+			input: `# @name testRequest
+# @note This is a test
+< {%
+client.log("pre");
+%}
+GET https://api.example.com/users`,
+			wantPreScript:  "client.log(\"pre\");",
+			wantPostScript: "",
+		},
+		{
+			name: "script with unicode characters",
+			input: `GET https://api.example.com/users
+
+> {%
+var emoji = "🚀";
+var chinese = "你好";
+client.log(emoji + " " + chinese);
+%}`,
+			wantPreScript:  "",
+			wantPostScript: "var emoji = \"🚀\";\nvar chinese = \"你好\";\nclient.log(emoji + \" \" + chinese);",
+		},
+		{
+			name:           "script with template literal syntax",
+			input:          "GET https://api.example.com/users\n\n> {%\nvar msg = `Hello ${name}`;\nclient.log(msg);\n%}",
+			wantPreScript:  "",
+			wantPostScript: "var msg = `Hello ${name}`;\nclient.log(msg);",
+		},
+		{
+			name: "body with script-like content not treated as script",
+			input: `POST https://api.example.com/data
+Content-Type: application/json
+
+{
+    "code": "> {% client.log('test'); %}"
+}`,
+			wantPreScript:  "",
+			wantPostScript: "",
+			wantBody:       "{\n    \"code\": \"> {% client.log('test'); %}\"\n}",
+		},
+		{
+			name: "pre-script file reference with spaces in path",
+			input: `< ./my script.js
+GET https://api.example.com/users`,
+			wantPreScript:  "",
+			wantPostScript: "",
+		},
+		{
+			name: "script with arrow functions",
+			input: `GET https://api.example.com/users
+
+> {%
+client.test("test", () => {
+    const check = (x) => x > 0;
+    client.assert(check(1));
+});
+%}`,
+			wantPreScript:  "",
+			wantPostScript: "client.test(\"test\", () => {\n    const check = (x) => x > 0;\n    client.assert(check(1));\n});",
+		},
+		{
+			name: "script with async/await",
+			input: `GET https://api.example.com/users
+
+> {%
+async function test() {
+    await client.delay(100);
+    client.log("done");
+}
+test();
+%}`,
+			wantPreScript:  "",
+			wantPostScript: "async function test() {\n    await client.delay(100);\n    client.log(\"done\");\n}\ntest();",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewHttpRequestParser(tt.input, nil, "")
+			req, err := parser.ParseRequest(tt.input)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ParseRequest() error = %v", err)
+			}
+
+			if tt.wantPreScript != "" && req.Metadata.PreScript != tt.wantPreScript {
+				t.Errorf("PreScript = %q, want %q", req.Metadata.PreScript, tt.wantPreScript)
+			}
+
+			if tt.wantPostScript != "" && req.Metadata.PostScript != tt.wantPostScript {
+				t.Errorf("PostScript = %q, want %q", req.Metadata.PostScript, tt.wantPostScript)
+			}
+
+			if tt.wantBody != "" && req.RawBody != tt.wantBody {
+				t.Errorf("RawBody = %q, want %q", req.RawBody, tt.wantBody)
+			}
+		})
+	}
+}
+
+// TestScriptDelimiterEdgeCases tests edge cases around script delimiters
+func TestScriptDelimiterEdgeCases(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		wantPreScript  string
+		wantPostScript string
+	}{
+		{
+			name: "delimiter with extra spaces",
+			input: `GET https://api.example.com/users
+
+>   {%
+client.log("test");
+%}`,
+			wantPostScript: "",
+		},
+		{
+			name: "closing delimiter with leading content",
+			input: `GET https://api.example.com/users
+
+> {%
+var x = 1; %}`,
+			wantPostScript: "var x = 1; ", // trailing space before %}
+		},
+		{
+			name: "pre-script delimiter variations",
+			input: `<{%
+client.log("no space");
+%}
+GET https://api.example.com/users`,
+			wantPreScript: "", // requires space after <
+		},
+		{
+			name: "script with multiple closing markers in string",
+			input: `GET https://api.example.com/users
+
+> {%
+var pattern = "%} and %}";
+client.log(pattern);
+%}`,
+			wantPostScript: "var pattern = \"", // parser stops at first %}
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewHttpRequestParser(tt.input, nil, "")
+			req, err := parser.ParseRequest(tt.input)
+			if err != nil {
+				t.Fatalf("ParseRequest() error = %v", err)
+			}
+
+			if tt.wantPreScript != "" && req.Metadata.PreScript != tt.wantPreScript {
+				t.Errorf("PreScript = %q, want %q", req.Metadata.PreScript, tt.wantPreScript)
+			}
+
+			if tt.wantPostScript != "" && req.Metadata.PostScript != tt.wantPostScript {
+				t.Errorf("PostScript = %q, want %q", req.Metadata.PostScript, tt.wantPostScript)
+			}
+		})
+	}
+}
+
+// TestScriptWithExternalFile tests script file references with actual files
+func TestScriptWithExternalFile(t *testing.T) {
+	// Create temp directory and script file
+	tmpDir := t.TempDir()
+
+	preScriptContent := `client.log("pre-script from file");
+client.global.set("fromFile", true);`
+
+	postScriptContent := `client.test("from file", function() {
+    client.assert(response.status === 200);
+});`
+
+	preScriptPath := tmpDir + "/pre.js"
+	postScriptPath := tmpDir + "/post.js"
+
+	if err := os.WriteFile(preScriptPath, []byte(preScriptContent), 0644); err != nil {
+		t.Fatalf("Failed to write pre-script file: %v", err)
+	}
+	if err := os.WriteFile(postScriptPath, []byte(postScriptContent), 0644); err != nil {
+		t.Fatalf("Failed to write post-script file: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		input          string
+		wantPreScript  string
+		wantPostScript string
+	}{
+		{
+			name: "pre-script from file",
+			input: `< ./pre.js
+GET https://api.example.com/users`,
+			wantPreScript: preScriptContent,
+		},
+		{
+			name: "post-script from file",
+			input: `GET https://api.example.com/users
+
+> ./post.js`,
+			wantPostScript: postScriptContent,
+		},
+		{
+			name: "both scripts from files",
+			input: `< ./pre.js
+GET https://api.example.com/users
+
+> ./post.js`,
+			wantPreScript:  preScriptContent,
+			wantPostScript: postScriptContent,
+		},
+		{
+			name: "mixed inline and file scripts",
+			input: `< {%
+client.log("inline pre");
+%}
+GET https://api.example.com/users
+
+> ./post.js`,
+			wantPreScript:  "client.log(\"inline pre\");",
+			wantPostScript: postScriptContent,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewHttpRequestParser(tt.input, nil, tmpDir)
+			req, err := parser.ParseRequest(tt.input)
+			if err != nil {
+				t.Fatalf("ParseRequest() error = %v", err)
+			}
+
+			if tt.wantPreScript != "" && req.Metadata.PreScript != tt.wantPreScript {
+				t.Errorf("PreScript = %q, want %q", req.Metadata.PreScript, tt.wantPreScript)
+			}
+
+			if tt.wantPostScript != "" && req.Metadata.PostScript != tt.wantPostScript {
+				t.Errorf("PostScript = %q, want %q", req.Metadata.PostScript, tt.wantPostScript)
+			}
+		})
+	}
+}
+
+// TestScriptPreservesIndentation tests that script indentation is preserved
+func TestScriptPreservesIndentation(t *testing.T) {
+	input := `GET https://api.example.com/users
+
+> {%
+function test() {
+    if (true) {
+        client.log("indented");
+    }
+}
+%}`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	req, err := parser.ParseRequest(input)
+	if err != nil {
+		t.Fatalf("ParseRequest() error = %v", err)
+	}
+
+	// Check that indentation is preserved
+	if !strings.Contains(req.Metadata.PostScript, "    if (true)") {
+		t.Errorf("Script indentation not preserved: %q", req.Metadata.PostScript)
+	}
+	if !strings.Contains(req.Metadata.PostScript, "        client.log") {
+		t.Errorf("Nested indentation not preserved: %q", req.Metadata.PostScript)
+	}
+}
+
+// TestScriptInMultipleRequests tests scripts in files with multiple requests
+func TestScriptInMultipleRequests(t *testing.T) {
+	input := `# @name first
+< {%
+client.global.set("request", "first");
+%}
+GET https://api.example.com/first
+
+> {%
+client.log("first response");
+%}
+
+###
+
+# @name second
+< {%
+client.global.set("request", "second");
+%}
+POST https://api.example.com/second
+Content-Type: application/json
+
+{"data": "test"}
+
+> {%
+client.log("second response");
+%}`
+
+	parser := NewHttpRequestParser(input, nil, "")
+	result := parser.ParseAllWithWarnings()
+
+	if len(result.Requests) != 2 {
+		t.Fatalf("Expected 2 requests, got %d", len(result.Requests))
+	}
+
+	// Check first request
+	first := result.Requests[0]
+	if !strings.Contains(first.Metadata.PreScript, "\"first\"") {
+		t.Errorf("First request PreScript should reference 'first': %q", first.Metadata.PreScript)
+	}
+	if !strings.Contains(first.Metadata.PostScript, "first response") {
+		t.Errorf("First request PostScript should contain 'first response': %q", first.Metadata.PostScript)
+	}
+
+	// Check second request
+	second := result.Requests[1]
+	if !strings.Contains(second.Metadata.PreScript, "\"second\"") {
+		t.Errorf("Second request PreScript should reference 'second': %q", second.Metadata.PreScript)
+	}
+	if !strings.Contains(second.Metadata.PostScript, "second response") {
+		t.Errorf("Second request PostScript should contain 'second response': %q", second.Metadata.PostScript)
 	}
 }

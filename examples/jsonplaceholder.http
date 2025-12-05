@@ -1,434 +1,319 @@
-### JSONPlaceholder API Examples
-### https://jsonplaceholder.typicode.com
+### Comprehensive Examples
+### This file demonstrates various request patterns including user input,
+### scripting, and common malformed request scenarios with parser warnings.
 
 @baseUrl = https://jsonplaceholder.typicode.com
 
 ###############################################################################
-# POSTS
+# BASIC REQUESTS (No User Input)
 ###############################################################################
 
-### Get all posts
-# @name getAllPosts
-GET {{baseUrl}}/posts
-Accept: application/json
-
-### Get a single post
-# @name getPost
+### Simple GET request - no parameters
+# @name simpleGet
 GET {{baseUrl}}/posts/1
 Accept: application/json
 
-### Create a new post
-# @name createPost
+### GET with static query parameters
+# @name staticQuery
+GET {{baseUrl}}/posts?userId=1&_limit=5
+Accept: application/json
+
+### POST with static body
+# @name staticPost
 POST {{baseUrl}}/posts
 Content-Type: application/json
 
 {
-    "title": "My New Post",
-    "body": "This is the content of my new post created at {{$datetime iso8601}}",
+    "title": "Static Title",
+    "body": "This post has no dynamic content",
     "userId": 1
 }
 
-### Update a post (PUT - full replacement)
-# @name updatePost
-PUT {{baseUrl}}/posts/1
-Content-Type: application/json
+###############################################################################
+# USER INPUT IN URL PATH AND QUERY ({{:paramName}})
+###############################################################################
 
-{
-    "id": 1,
-    "title": "Updated Post Title",
-    "body": "This post has been fully updated",
-    "userId": 1
-}
+### GET with user input in path
+# @name dynamicPath
+# Prompts for: id
+GET {{baseUrl}}/posts/{{:id}}
+Accept: application/json
 
-### Partial update a post (PATCH)
-# @name patchPost
-PATCH {{baseUrl}}/posts/1
-Content-Type: application/json
-
-{
-    "title": "Patched Title Only"
-}
-
-### Delete a post
-# @name deletePost
-DELETE {{baseUrl}}/posts/1
-
-### Get posts by user (query parameter)
-# @name getPostsByUser
+### GET with user input in query parameters
+# @name dynamicQuery
+# Prompts for: userId, page, limit
 GET {{baseUrl}}/posts
-    ?userId=1
+    ?userId={{:userId}}
+    &_page={{:page}}
+    &_limit={{:limit}}
 Accept: application/json
 
-###############################################################################
-# COMMENTS
-###############################################################################
-
-### Get all comments for a post
-# @name getComments
-GET {{baseUrl}}/posts/1/comments
+### GET with user input in both path and query
+# @name dynamicPathAndQuery
+# Prompts for: userId, completed
+GET {{baseUrl}}/users/{{:userId}}/todos?completed={{:completed}}
 Accept: application/json
 
-### Get comments using query parameter
-# @name getCommentsByPost
-GET {{baseUrl}}/comments?postId=1
-Accept: application/json
-
-### Create a comment
-# @name createComment
-POST {{baseUrl}}/comments
+### POST with user input in body
+# @name dynamicBody
+# Prompts for: title, body, authorId
+POST {{baseUrl}}/posts
 Content-Type: application/json
 
 {
-    "postId": 1,
-    "name": "My Comment",
-    "email": "user@example.com",
-    "body": "This is a great post! Comment ID: {{$guid}}"
+    "title": "{{:title}}",
+    "body": "{{:body}}",
+    "userId": {{:authorId}}
 }
 
-###############################################################################
-# USERS
-###############################################################################
-
-### Get all users
-# @name getAllUsers
-GET {{baseUrl}}/users
-Accept: application/json
-
-### Get a single user
-# @name getUser
-GET {{baseUrl}}/users/1
-Accept: application/json
-
-### Create a new user
-# @name createUser
-POST {{baseUrl}}/users
+### PUT with user input in path and body
+# @name dynamicUpdate
+# Prompts for: postId, newTitle, newBody
+PUT {{baseUrl}}/posts/{{:postId}}
 Content-Type: application/json
 
 {
-    "name": "John Doe",
-    "username": "johndoe_{{$randomInt 1000 9999}}",
-    "email": "john.doe@example.com",
-    "address": {
-        "street": "123 Main St",
-        "suite": "Apt 4",
-        "city": "New York",
-        "zipcode": "10001",
-        "geo": {
-            "lat": "40.7128",
-            "lng": "-74.0060"
-        }
-    },
-    "phone": "1-234-567-8900",
-    "website": "johndoe.com",
-    "company": {
-        "name": "Doe Industries",
-        "catchPhrase": "Innovation at its finest",
-        "bs": "synergize scalable solutions"
-    }
+    "id": {{:postId}},
+    "title": "{{:newTitle}}",
+    "body": "{{:newBody}}",
+    "userId": 1
 }
 
 ###############################################################################
-# TODOS
+# USER INPUT IN SCRIPTS
 ###############################################################################
 
-### Get all todos
-# @name getAllTodos
-GET {{baseUrl}}/todos
+### Pre-request script with user input
+# @name scriptUserInput
+# Prompts for: searchTerm (used in pre-request script)
+< {%
+// User input is available in scripts via global variables
+var term = "{{:searchTerm}}";
+client.log("Searching for: " + term);
+client.global.set("searchTerm", term);
+%}
+GET {{baseUrl}}/posts
 Accept: application/json
 
-### Get todos for a specific user
-# @name getTodosByUser
-GET {{baseUrl}}/todos?userId=1
+> {%
+client.test("Search completed", function() {
+    client.assert(response.status === 200);
+});
+client.log("Found " + response.body.length + " posts");
+%}
+
+### Dynamic test assertions with user input
+# @name dynamicTest
+# Prompts for: expectedId
+GET {{baseUrl}}/posts/{{:expectedId}}
 Accept: application/json
 
-### Get a single todo
-# @name getTodo
-GET {{baseUrl}}/todos/1
+> {%
+var expectedId = parseInt("{{:expectedId}}");
+client.test("Response has correct ID", function() {
+    client.assert(response.body.id === expectedId, 
+        "Expected ID " + expectedId + " but got " + response.body.id);
+});
+%}
+
+### User input for authentication header
+# @name authWithUserInput
+# Prompts for: apiToken
+GET {{baseUrl}}/posts/1
+Accept: application/json
+Authorization: Bearer {{:apiToken}}
+
+> {%
+client.test("Request was authenticated", function() {
+    client.assert(response.status === 200);
+});
+%}
+
+###############################################################################
+# MALFORMED REQUESTS - URL ISSUES
+###############################################################################
+# These requests demonstrate parser warnings for common URL mistakes
+
+### Unknown HTTP method (typo: DELET instead of DELETE)
+# @name malformedMethod
+# Warning: unknown HTTP method 'DELET', defaulting to GET
+DELET {{baseUrl}}/posts/1
 Accept: application/json
 
-### Create a todo
-# @name createTodo
-POST {{baseUrl}}/todos
+### Another method typo (POSTT instead of POST)
+# @name malformedMethodPost
+# Warning: unknown HTTP method 'POSTT', defaulting to GET
+POSTT {{baseUrl}}/posts
 Content-Type: application/json
 
 {
-    "userId": 1,
-    "title": "Learn to use rest-client CLI - {{$datetime iso8601}}",
-    "completed": false
+    "title": "This won't POST correctly",
+    "body": "Method typo means this becomes GET",
+    "userId": 1
 }
 
-### Mark todo as completed
-# @name completeTodo
-PATCH {{baseUrl}}/todos/1
+###############################################################################
+# MALFORMED REQUESTS - HEADER ISSUES
+###############################################################################
+
+### Header without colon separator
+# @name malformedHeaderNoColon
+# Warning: malformed header 'Authorization Bearer token' - missing colon
+GET {{baseUrl}}/posts/1
+Authorization Bearer token123
+Accept: application/json
+
+### Multiple malformed headers
+# @name malformedHeadersMultiple
+# Warning: multiple headers missing colons
+GET {{baseUrl}}/posts/1
+Content-Type application/json
+Accept text/plain
+Cache-Control no-cache
+
+###############################################################################
+# MALFORMED REQUESTS - BODY ISSUES
+###############################################################################
+
+### Body referencing non-existent file
+# @name malformedBodyMissingFile
+# Warning: file reference could not be read
+POST {{baseUrl}}/posts
 Content-Type: application/json
 
-{
-    "completed": true
-}
+< ./data/nonexistent-payload.json
+
+### Multiple file references with one missing
+# @name malformedBodyPartialFile
+# Warning: one file reference fails, others may succeed
+POST {{baseUrl}}/posts
+Content-Type: application/json
+
+< ./missing-file.json
 
 ###############################################################################
-# ALBUMS & PHOTOS
+# MALFORMED REQUESTS - SCRIPT ISSUES
 ###############################################################################
 
-### Get all albums
-# @name getAllAlbums
-GET {{baseUrl}}/albums
-Accept: application/json
-
-### Get albums for a user
-# @name getAlbumsByUser
-GET {{baseUrl}}/albums?userId=1
-Accept: application/json
-
-### Get photos in an album
-# @name getPhotosByAlbum
-GET {{baseUrl}}/albums/1/photos
-Accept: application/json
-
-### Get a single photo
-# @name getPhoto
-GET {{baseUrl}}/photos/1
-Accept: application/json
-
-###############################################################################
-# NESTED RESOURCES
-###############################################################################
-
-### Get user's posts
-# @name getUserPosts
-GET {{baseUrl}}/users/1/posts
-Accept: application/json
-
-### Get user's todos
-# @name getUserTodos
-GET {{baseUrl}}/users/1/todos
-Accept: application/json
-
-### Get user's albums
-# @name getUserAlbums
-GET {{baseUrl}}/users/1/albums
-Accept: application/json
-
-###############################################################################
-# SCRIPTING EXAMPLES
-###############################################################################
-
-### Get post with tests
-# @name getPostWithTests
+### Script with syntax error (unclosed brace)
+# @name malformedScriptSyntax
 GET {{baseUrl}}/posts/1
 Accept: application/json
 
 > {%
-client.test("Status is 200", function() {
-    client.assert(response.status === 200, "Expected status 200");
-});
-
-client.test("Response has id", function() {
-    client.assert(response.body.id === 1, "Expected id to be 1");
-});
-
-client.test("Response has title", function() {
-    client.assert(response.body.title !== undefined, "Expected title to exist");
-});
-
-// Log some information
-client.log("Post title: " + response.body.title);
-
-// Store post ID for later use
-client.global.set("postId", response.body.id);
+client.test("This has a syntax error", function() {
+    client.assert(response.status === 200);
+// Missing closing brace - this will cause runtime error
 %}
 
-### Create post and verify response
-# @name createPostWithTests
-POST {{baseUrl}}/posts
+### Script with undefined variable reference
+# @name malformedScriptUndefined
+GET {{baseUrl}}/posts/1
+Accept: application/json
+
+> {%
+client.test("Undefined variable", function() {
+    // undefinedVar is never declared
+    client.assert(undefinedVar === true);
+});
+%}
+
+### Pre-request script error
+# @name malformedPreScript
+< {%
+// This will throw an error
+throw new Error("Intentional pre-script error");
+%}
+GET {{baseUrl}}/posts/1
+Accept: application/json
+
+###############################################################################
+# COMBINED MALFORMED - MULTIPLE ISSUES
+###############################################################################
+
+### Multiple issues in one request
+# @name malformedCombined
+# Warning: unknown method, malformed headers, missing file
+DELET {{baseUrl}}/posts/1
+Authorization Bearer token
+Content-Type application/json
+
+< ./nonexistent.json
+
+### Method typo with script error
+# @name malformedMethodAndScript
+POSTT {{baseUrl}}/posts
 Content-Type: application/json
 
 {
-    "title": "Test Post",
-    "body": "This is a test post",
+    "title": "Test",
+    "body": "Test body",
+    "userId": 1
+}
+
+> {%
+// Syntax error in post-response script
+client.test("Will fail", function() {
+    client.assert(response.status === 201)  // missing semicolon is ok
+    // but this unclosed function is not
+%}
+
+###############################################################################
+# VALID REQUESTS FOR COMPARISON
+###############################################################################
+
+### Valid DELETE request (correct spelling)
+# @name validDelete
+DELETE {{baseUrl}}/posts/1
+
+### Valid POST with all correct syntax
+# @name validPost
+POST {{baseUrl}}/posts
+Content-Type: application/json
+Accept: application/json
+Cache-Control: no-cache
+
+{
+    "title": "Valid Post",
+    "body": "All syntax is correct",
     "userId": 1
 }
 
 > {%
 client.test("Status is 201", function() {
-    client.assert(response.status === 201, "Expected status 201 for created resource");
+    client.assert(response.status === 201, "Expected 201 Created");
 });
-
-client.test("Response contains id", function() {
-    client.assert(response.body.id !== undefined, "Expected response to have an id");
-});
-
-client.test("Title matches", function() {
-    client.assert(response.body.title === "Test Post", "Title should match");
-});
-
-// Store the created post ID
-client.global.set("createdPostId", response.body.id);
-client.log("Created post with ID: " + response.body.id);
+client.log("Post created with ID: " + response.body.id);
 %}
 
-### Get users with content type validation
-# @name getUsersWithContentTypeCheck
-GET {{baseUrl}}/users
+### Valid request with all features
+# @name validComplete
+# Prompts for: postId
+< {%
+client.log("Fetching post...");
+var startTime = Date.now();
+client.global.set("startTime", startTime);
+%}
+GET {{baseUrl}}/posts/{{:postId}}
 Accept: application/json
+Cache-Control: no-cache
 
 > {%
+var endTime = Date.now();
+var startTime = client.global.get("startTime");
+var duration = endTime - startTime;
+
 client.test("Status is 200", function() {
     client.assert(response.status === 200);
 });
 
-client.test("Content-Type is JSON", function() {
-    var contentType = response.headers.valueOf("Content-Type");
-    client.assert(contentType.includes("application/json"), "Expected JSON content type");
+client.test("Has valid post structure", function() {
+    client.assert(response.body.id !== undefined);
+    client.assert(response.body.title !== undefined);
+    client.assert(response.body.body !== undefined);
+    client.assert(response.body.userId !== undefined);
 });
 
-client.test("Response is an array", function() {
-    client.assert(Array.isArray(response.body), "Expected response to be an array");
-});
-
-client.test("Has at least one user", function() {
-    client.assert(response.body.length > 0, "Expected at least one user");
-});
-
-// Log user count
-client.log("Found " + response.body.length + " users");
-%}
-
-### Pre-request script example
-# @name preRequestExample
-< {%
-// This runs before the request is sent
-client.log("Preparing request...");
-var timestamp = Date.now();
-client.global.set("requestTimestamp", timestamp);
-%}
-GET {{baseUrl}}/posts/1
-Accept: application/json
-
-> {%
-client.test("Request was successful", function() {
-    client.assert(response.status === 200);
-});
-
-client.log("Request completed");
-%}
-
-###############################################################################
-# UTILITY FUNCTIONS EXAMPLES
-###############################################################################
-
-### Using built-in utility functions
-# @name utilityFunctionsDemo
-< {%
-// Generate unique request ID
-var requestId = $uuid();
-client.global.set("requestId", requestId);
-client.log("Request ID: " + requestId);
-
-// Generate timestamp
-var ts = $timestamp();
-client.log("Timestamp: " + ts);
-
-// ISO timestamp
-var isoTs = $isoTimestamp();
-client.log("ISO Timestamp: " + isoTs);
-%}
-POST {{baseUrl}}/posts
-Content-Type: application/json
-X-Request-ID: {{requestId}}
-
-{
-    "title": "Post with UUID",
-    "body": "This post was created with a unique request ID",
-    "userId": 1
-}
-
-> {%
-client.test("Post created successfully", function() {
-    client.assert(response.status === 201);
-});
-
-// Hash the response body
-var bodyHash = $sha256(JSON.stringify(response.body));
-client.log("Response hash: " + bodyHash);
-
-// Generate a random session token
-var sessionToken = $randomString(32);
-client.global.set("sessionToken", sessionToken);
-client.log("Session token: " + sessionToken);
-%}
-
-### Base64 encoding/decoding example
-# @name base64Example
-< {%
-// Encode credentials for Basic auth simulation
-var credentials = "username:password";
-var encoded = $base64(credentials);
-client.global.set("encodedCredentials", encoded);
-client.log("Encoded: " + encoded);
-
-// Decode to verify
-var decoded = $base64Decode(encoded);
-client.log("Decoded: " + decoded);
-%}
-GET {{baseUrl}}/users/1
-Accept: application/json
-
-> {%
-client.test("Status is 200", function() {
-    client.assert(response.status === 200);
-});
-%}
-
-### Hashing example
-# @name hashingExample
-GET {{baseUrl}}/posts/1
-Accept: application/json
-
-> {%
-// Hash the response for integrity checking
-var bodyStr = JSON.stringify(response.body);
-
-var md5Hash = $md5(bodyStr);
-var sha256Hash = $sha256(bodyStr);
-var sha512Hash = $sha512(bodyStr);
-
-client.log("MD5: " + md5Hash);
-client.log("SHA256: " + sha256Hash);
-client.log("SHA512 (first 32 chars): " + sha512Hash.substring(0, 32) + "...");
-
-// Store hashes for comparison
-client.global.set("responseHash", sha256Hash);
-
-client.test("Response integrity check", function() {
-    client.assert(sha256Hash.length === 64, "SHA256 should be 64 chars");
-});
-%}
-
-### Random values example
-# @name randomValuesExample
-< {%
-// Generate random values for the request
-var orderId = $randomInt(10000, 99999);
-var verificationCode = $randomString(6);
-
-client.global.set("orderId", orderId);
-client.global.set("verificationCode", verificationCode);
-
-client.log("Order ID: " + orderId);
-client.log("Verification Code: " + verificationCode);
-%}
-POST {{baseUrl}}/posts
-Content-Type: application/json
-
-{
-    "title": "Order #{{orderId}}",
-    "body": "Verification code: {{verificationCode}}",
-    "userId": 1
-}
-
-> {%
-client.test("Created with random values", function() {
-    client.assert(response.status === 201);
-});
+client.log("Request completed in " + duration + "ms");
+client.log("Post title: " + response.body.title);
 %}

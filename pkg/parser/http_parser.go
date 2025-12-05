@@ -385,10 +385,18 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	}
 
 	// Parse request line
-	method, url := parseRequestLine(strings.Join(requestLines, ""))
+	reqLineResult := parseRequestLine(strings.Join(requestLines, ""))
+	method := reqLineResult.Method
+	url := reqLineResult.URL
+
+	// Collect request line warnings (will be added to parser warnings later if needed)
+	var requestWarnings []string
+	requestWarnings = append(requestWarnings, reqLineResult.Warnings...)
 
 	// Parse headers
-	headers := parseHeaders(headerLines, p.defaultHeaders, url)
+	headersResult := parseHeadersWithWarnings(headerLines, p.defaultHeaders, url)
+	headers := headersResult.Headers
+	requestWarnings = append(requestWarnings, headersResult.Warnings...)
 
 	// Check for GraphQL request
 	isGraphQL := false
@@ -411,10 +419,10 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 	}
 
 	// Parse body
-	body, rawBody, err := p.parseBody(bodyLines, headers, isGraphQL)
-	if err != nil {
-		return nil, err
-	}
+	bodyResult := p.parseBodyWithWarnings(bodyLines, headers, isGraphQL)
+	body := bodyResult.Body
+	rawBody := bodyResult.RawBody
+	requestWarnings = append(requestWarnings, bodyResult.Warnings...)
 
 	// Handle Host header for relative URLs
 	if hostHeader, ok := httputil.GetHeader(headers, constants.HeaderHost); ok && strings.HasPrefix(url, "/") {
@@ -427,6 +435,7 @@ func (p *HttpRequestParser) ParseRequest(rawText string) (*models.HttpRequest, e
 
 	req := models.NewHttpRequest(method, url, headers, body, rawBody, metadata.Name)
 	req.Metadata = metadata
+	req.Warnings = requestWarnings
 
 	// Parse multipart parts if applicable
 	contentType, _ := httputil.GetHeader(headers, constants.HeaderContentType)
@@ -510,39 +519,80 @@ func isQueryStringContinuation(line string) bool {
 	return strings.HasPrefix(trimmed, "?") || strings.HasPrefix(trimmed, "&")
 }
 
+// validHTTPMethods contains all valid HTTP methods
+var validHTTPMethods = map[string]bool{
+	"GET": true, "POST": true, "PUT": true, "DELETE": true, "PATCH": true,
+	"HEAD": true, "OPTIONS": true, "CONNECT": true, "TRACE": true,
+	"LOCK": true, "UNLOCK": true, "PROPFIND": true, "PROPPATCH": true,
+	"COPY": true, "MOVE": true, "MKCOL": true, "MKCALENDAR": true,
+	"ACL": true, "SEARCH": true,
+}
+
+// parseRequestLineResult contains the parsed request line and any warnings
+type parseRequestLineResult struct {
+	Method   string
+	URL      string
+	Warnings []string
+}
+
 // parseRequestLine parses the request line (method URL HTTP-version)
-func parseRequestLine(line string) (method, url string) {
+func parseRequestLine(line string) parseRequestLineResult {
+	result := parseRequestLineResult{}
 	line = strings.TrimSpace(line)
 
 	// Match HTTP method
 	methodRegex := regexp.MustCompile(`^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE|LOCK|UNLOCK|PROPFIND|PROPPATCH|COPY|MOVE|MKCOL|MKCALENDAR|ACL|SEARCH)\s+`)
 	if matches := methodRegex.FindStringSubmatch(strings.ToUpper(line)); matches != nil {
-		method = matches[1]
+		result.Method = matches[1]
 		line = line[len(matches[0]):]
 	} else {
-		method = "GET"
+		// Check if line starts with something that looks like a method (word followed by space)
+		wordRegex := regexp.MustCompile(`^([A-Za-z]+)\s+`)
+		if wordMatches := wordRegex.FindStringSubmatch(line); wordMatches != nil {
+			possibleMethod := strings.ToUpper(wordMatches[1])
+			if !validHTTPMethods[possibleMethod] {
+				result.Warnings = append(result.Warnings, fmt.Sprintf(
+					"unknown HTTP method '%s', defaulting to GET. Valid methods: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+					wordMatches[1]))
+			}
+		}
+		result.Method = "GET"
 	}
 
-	url = line
+	result.URL = line
 
 	// Remove HTTP version suffix
 	versionRegex := regexp.MustCompile(`\s+HTTP/[\d.]+\s*$`)
-	url = versionRegex.ReplaceAllString(url, "")
-	url = strings.TrimSpace(url)
+	result.URL = versionRegex.ReplaceAllString(result.URL, "")
+	result.URL = strings.TrimSpace(result.URL)
 
-	return method, url
+	return result
 }
 
-// parseHeaders parses header lines into a map
+// parseHeaders parses header lines into a map (backward compatible, no warnings)
 func parseHeaders(lines []string, defaultHeaders map[string]string, url string) map[string]string {
-	headers := make(map[string]string)
+	result := parseHeadersWithWarnings(lines, defaultHeaders, url)
+	return result.Headers
+}
+
+// parseHeadersResult contains the parsed headers and any warnings
+type parseHeadersResult struct {
+	Headers  map[string]string
+	Warnings []string
+}
+
+// parseHeadersWithWarnings parses header lines into a map and returns warnings
+func parseHeadersWithWarnings(lines []string, defaultHeaders map[string]string, url string) parseHeadersResult {
+	result := parseHeadersResult{
+		Headers: make(map[string]string),
+	}
 
 	// Copy default headers (except Host for non-relative URLs)
 	for k, v := range defaultHeaders {
 		if strings.EqualFold(k, constants.HeaderHost) && !strings.HasPrefix(url, "/") {
 			continue
 		}
-		headers[k] = v
+		result.Headers[k] = v
 	}
 
 	headerNames := make(map[string]string) // lowercase -> original case
@@ -553,6 +603,12 @@ func parseHeaders(lines []string, defaultHeaders map[string]string, url string) 
 		if colonIdx == -1 {
 			name = strings.TrimSpace(line)
 			value = ""
+			// Warn about malformed header
+			if name != "" {
+				result.Warnings = append(result.Warnings, fmt.Sprintf(
+					"malformed header '%s': missing colon separator. Expected format: 'Header-Name: value'",
+					name))
+			}
 		} else {
 			name = strings.TrimSpace(line[:colonIdx])
 			value = strings.TrimSpace(line[colonIdx+1:])
@@ -565,20 +621,35 @@ func parseHeaders(lines []string, defaultHeaders map[string]string, url string) 
 			if strings.EqualFold(lowerName, constants.HeaderCookie) {
 				splitter = ";"
 			}
-			headers[existingName] = headers[existingName] + splitter + value
+			result.Headers[existingName] = result.Headers[existingName] + splitter + value
 		} else {
 			headerNames[lowerName] = name
-			headers[name] = value
+			result.Headers[name] = value
 		}
 	}
 
-	return headers
+	return result
 }
 
-// parseBody parses the request body
+// parseBodyResult contains the parsed body and any warnings
+type parseBodyResult struct {
+	Body     io.Reader
+	RawBody  string
+	Warnings []string
+}
+
+// parseBody parses the request body (backward compatible, no warnings)
 func (p *HttpRequestParser) parseBody(lines []string, headers map[string]string, isGraphQL bool) (io.Reader, string, error) {
+	result := p.parseBodyWithWarnings(lines, headers, isGraphQL)
+	return result.Body, result.RawBody, nil
+}
+
+// parseBodyWithWarnings parses the request body and returns warnings
+func (p *HttpRequestParser) parseBodyWithWarnings(lines []string, headers map[string]string, isGraphQL bool) parseBodyResult {
+	result := parseBodyResult{}
+
 	if len(lines) == 0 {
-		return nil, "", nil
+		return result
 	}
 
 	// Trim leading empty lines
@@ -589,7 +660,7 @@ func (p *HttpRequestParser) parseBody(lines []string, headers map[string]string,
 	lines = lines[start:]
 
 	if len(lines) == 0 {
-		return nil, "", nil
+		return result
 	}
 
 	contentType, _ := httputil.GetHeader(headers, constants.HeaderContentType)
@@ -606,7 +677,10 @@ func (p *HttpRequestParser) parseBody(lines []string, headers map[string]string,
 
 			content, err := p.readFileContent(filePath, encoding)
 			if err != nil {
-				// If file not found, use line as-is
+				// Warn about missing file reference
+				result.Warnings = append(result.Warnings, fmt.Sprintf(
+					"file reference '%s' could not be read: %v. Using literal content instead",
+					filePath, err))
 				bodyParts = append(bodyParts, line)
 			} else {
 				bodyParts = append(bodyParts, content)
@@ -622,12 +696,12 @@ func (p *HttpRequestParser) parseBody(lines []string, headers map[string]string,
 		lineEnding = "\r\n"
 	}
 
-	rawBody := strings.Join(bodyParts, lineEnding)
+	result.RawBody = strings.Join(bodyParts, lineEnding)
 
 	// Handle form-urlencoded
 	if isFormUrlEncoded(contentType) {
 		// Remove newlines for form data, keep & as separator
-		parts := strings.Split(rawBody, "\n")
+		parts := strings.Split(result.RawBody, "\n")
 		var formParts []string
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
@@ -637,15 +711,16 @@ func (p *HttpRequestParser) parseBody(lines []string, headers map[string]string,
 				formParts = append(formParts, part)
 			}
 		}
-		rawBody = strings.Join(formParts, "&")
+		result.RawBody = strings.Join(formParts, "&")
 	}
 
 	// Handle GraphQL
 	if isGraphQL {
-		rawBody = createGraphQLBody(rawBody)
+		result.RawBody = createGraphQLBody(result.RawBody)
 	}
 
-	return strings.NewReader(rawBody), rawBody, nil
+	result.Body = strings.NewReader(result.RawBody)
+	return result
 }
 
 // ParseFile parses an HTTP request file

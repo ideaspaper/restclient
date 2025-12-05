@@ -82,16 +82,16 @@ func FuzzParseRequestLine(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, input string) {
 		// Should not panic
-		method, url := parseRequestLine(input)
+		result := parseRequestLine(input)
 
 		// Method should be uppercase if not empty
-		if method != "" && method != strings.ToUpper(method) {
-			t.Errorf("Method should be uppercase: %s", method)
+		if result.Method != "" && result.Method != strings.ToUpper(result.Method) {
+			t.Errorf("Method should be uppercase: %s", result.Method)
 		}
 
 		// URL should not contain the method
-		if url != "" && method != "" && strings.HasPrefix(url, method) {
-			t.Errorf("URL should not start with method: %s", url)
+		if result.URL != "" && result.Method != "" && strings.HasPrefix(result.URL, result.Method) {
+			t.Errorf("URL should not start with method: %s", result.URL)
 		}
 	})
 }

@@ -20,11 +20,12 @@ import (
 )
 
 const (
-	sessionDirName  = "session"
-	dirSessionsDir  = "dirs"
-	namedSessionDir = "named"
-	cookiesFileName = "cookies.json"
-	varsFileName    = "variables.json"
+	sessionDirName     = "session"
+	dirSessionsDir     = "dirs"
+	namedSessionDir    = "named"
+	cookiesFileName    = "cookies.json"
+	varsFileName       = "variables.json"
+	userInputsFileName = "user_inputs.json"
 )
 
 // Cookie represents a serializable cookie
@@ -45,8 +46,9 @@ type SessionManager struct {
 	fs          filesystem.FileSystem
 	baseDir     string
 	sessionPath string
-	cookies     map[string][]Cookie // host -> cookies
-	variables   map[string]any      // variable name -> value
+	cookies     map[string][]Cookie          // host -> cookies
+	variables   map[string]any               // variable name -> value
+	userInputs  map[string]map[string]string // urlKey -> paramName -> value
 }
 
 // NewSessionManager creates a new session manager
@@ -92,6 +94,7 @@ func NewSessionManagerWithFS(fs filesystem.FileSystem, baseDir, httpFilePath, se
 		sessionPath: sessionPath,
 		cookies:     make(map[string][]Cookie),
 		variables:   make(map[string]any),
+		userInputs:  make(map[string]map[string]string),
 	}
 
 	return s, nil
@@ -111,6 +114,9 @@ func (s *SessionManager) Load() error {
 	if err := s.LoadVariables(); err != nil && !os.IsNotExist(err) {
 		return errors.Wrap(err, "failed to load variables")
 	}
+	if err := s.LoadUserInputs(); err != nil && !os.IsNotExist(err) {
+		return errors.Wrap(err, "failed to load user inputs")
+	}
 	return nil
 }
 
@@ -121,6 +127,9 @@ func (s *SessionManager) Save() error {
 	}
 	if err := s.SaveVariables(); err != nil {
 		return errors.Wrap(err, "failed to save variables")
+	}
+	if err := s.SaveUserInputs(); err != nil {
+		return errors.Wrap(err, "failed to save user inputs")
 	}
 	return nil
 }
@@ -347,6 +356,7 @@ func (s *SessionManager) ClearVariables() {
 func (s *SessionManager) ClearAll() {
 	s.ClearCookies()
 	s.ClearVariables()
+	s.ClearUserInputs()
 }
 
 // Delete removes the session directory from disk
@@ -446,4 +456,70 @@ func ClearAllSessionsWithFS(fs filesystem.FileSystem, baseDir string) error {
 
 	sessionDir := filepath.Join(baseDir, sessionDirName)
 	return fs.RemoveAll(sessionDir)
+}
+
+// LoadUserInputs loads user input values from disk.
+func (s *SessionManager) LoadUserInputs() error {
+	path := filepath.Join(s.sessionPath, userInputsFileName)
+	data, err := s.fs.ReadFile(path)
+	if err != nil {
+		return errors.Wrap(err, "failed to read user inputs file")
+	}
+
+	if err := json.Unmarshal(data, &s.userInputs); err != nil {
+		return errors.Wrap(err, "failed to parse user inputs file")
+	}
+	return nil
+}
+
+// SaveUserInputs persists user input values to disk.
+func (s *SessionManager) SaveUserInputs() error {
+	if err := s.fs.MkdirAll(s.sessionPath, 0755); err != nil {
+		return errors.Wrap(err, "failed to create session directory")
+	}
+
+	data, err := json.MarshalIndent(s.userInputs, "", "  ")
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal user inputs")
+	}
+
+	path := filepath.Join(s.sessionPath, userInputsFileName)
+	return s.fs.WriteFile(path, data, 0644)
+}
+
+// GetUserInputs retrieves stored values for a URL pattern.
+// Returns nil if no values are stored for the given key.
+func (s *SessionManager) GetUserInputs(urlKey string) map[string]string {
+	if values, ok := s.userInputs[urlKey]; ok {
+		// Return a copy to prevent external modification
+		result := make(map[string]string, len(values))
+		for k, v := range values {
+			result[k] = v
+		}
+		return result
+	}
+	return nil
+}
+
+// SetUserInputs stores values for a URL pattern.
+func (s *SessionManager) SetUserInputs(urlKey string, values map[string]string) {
+	if s.userInputs == nil {
+		s.userInputs = make(map[string]map[string]string)
+	}
+	// Store a copy to prevent external modification
+	stored := make(map[string]string, len(values))
+	for k, v := range values {
+		stored[k] = v
+	}
+	s.userInputs[urlKey] = stored
+}
+
+// ClearUserInputs clears all stored user input values.
+func (s *SessionManager) ClearUserInputs() {
+	s.userInputs = make(map[string]map[string]string)
+}
+
+// GetAllUserInputs returns all stored user input values.
+func (s *SessionManager) GetAllUserInputs() map[string]map[string]string {
+	return s.userInputs
 }

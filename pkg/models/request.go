@@ -61,6 +61,7 @@ type HttpRequest struct {
 	IsCancelled    bool
 	Metadata       RequestMetadata
 	MultipartParts []MultipartPart // For multipart/form-data
+	Warnings       []string        // Parsing warnings (e.g., unknown method, malformed headers)
 }
 
 // MultipartPart represents a part in a multipart/form-data request
