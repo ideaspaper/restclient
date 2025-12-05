@@ -704,17 +704,23 @@ GET https://api.example.com/search?q={{%searchTerm}}
 
 ### User Input Variables
 
-User input variables use the `{{:paramName}}` syntax and are ideal for dynamic path parameters and query parameters. By default, you'll be prompted to enter values each time you run a request. Values are saved to your session and can be reused with the `--use-cached` flag.
+User input variables use the `{{:paramName}}` syntax and are ideal for dynamic path parameters, query parameters, headers, and request bodies. By default, you'll be prompted to enter values each time you run a request. Values are saved to your session and can be reused with the `--use-cached` flag.
 
 **Syntax:**
 
 ```http
-### Get post by ID
-GET https://api.example.com/posts/{{:id}}
-
-### Get posts with pagination
-GET https://api.example.com/posts?page={{:page}}&limit={{:limit}}
+{{:paramName}}
 ```
+
+**Supported Locations:**
+
+| Location              | URL Encoding | Example                                     |
+| --------------------- | ------------ | ------------------------------------------- |
+| URL                   | Yes          | `https://api.example.com/users/{{:userId}}` |
+| Header values         | No           | `Authorization: Bearer {{:token}}`          |
+| Request body          | No           | `{"username": "{{:username}}"}`             |
+| Multipart form fields | No           | Text field value: `{{:description}}`        |
+| Multipart file paths  | No           | `< {{:filePath}}`                           |
 
 **Features:**
 
@@ -724,7 +730,78 @@ GET https://api.example.com/posts?page={{:page}}&limit={{:limit}}
 - **Unique per URL pattern**: Different endpoints maintain separate values
 - **Duplicate handling**: Same parameter name used multiple times prompts once
 
-**Examples:**
+**Basic Examples:**
+
+```http
+### Get post by ID (prompts for id)
+GET https://api.example.com/posts/{{:id}}
+
+### Get posts with pagination (prompts for page and limit)
+GET https://api.example.com/posts?page={{:page}}&limit={{:limit}}
+
+### Authentication header (prompts for token, no encoding)
+GET https://api.example.com/protected
+Authorization: Bearer {{:apiToken}}
+
+### JSON body (prompts for username and password)
+POST https://api.example.com/login
+Content-Type: application/json
+
+{
+  "username": "{{:username}}",
+  "password": "{{:password}}"
+}
+
+### Form URL-encoded body
+POST https://api.example.com/login
+Content-Type: application/x-www-form-urlencoded
+
+username={{:username}}&password={{:password}}
+```
+
+**Multipart Form Data Examples:**
+
+```http
+### Multipart with dynamic text field
+POST https://api.example.com/upload
+Content-Type: multipart/form-data; boundary=----FormBoundary
+
+------FormBoundary
+Content-Disposition: form-data; name="description"
+
+{{:fileDescription}}
+------FormBoundary
+Content-Disposition: form-data; name="file"; filename="document.pdf"
+Content-Type: application/pdf
+
+< ./document.pdf
+------FormBoundary--
+
+### Multipart with dynamic file path
+POST https://api.example.com/upload
+Content-Type: multipart/form-data; boundary=----FormBoundary
+
+------FormBoundary
+Content-Disposition: form-data; name="file"; filename="upload.pdf"
+Content-Type: application/pdf
+
+< {{:filePath}}
+------FormBoundary--
+```
+
+**Shared Values:**
+
+When the same parameter name is used multiple times, you only get prompted once:
+
+```http
+GET https://api.example.com/users/{{:userId}}/posts
+Authorization: Bearer {{:token}}
+X-User-Id: {{:userId}}
+```
+
+The `userId` value is shared between the URL and the `X-User-Id` header.
+
+**Command Line Examples:**
 
 ```bash
 # Prompts for :id value (default behavior)
@@ -739,31 +816,11 @@ restclient send api.http --name getPostById
 restclient send api.http --name getPostById --use-cached
 ```
 
-**Request File Example:**
-
-```http
-@baseUrl = https://jsonplaceholder.typicode.com
-
-### Get post by ID (prompts for id)
-# @name getPostById
-GET {{baseUrl}}/posts/{{:id}}
-Accept: application/json
-
-### Get posts with pagination (prompts for page and limit)
-# @name getPostsPaginated
-GET {{baseUrl}}/posts?_page={{:page}}&_limit={{:limit}}
-Accept: application/json
-
-### Get comments for a post (prompts for postId)
-# @name getCommentsForPost
-GET {{baseUrl}}/posts/{{:postId}}/comments
-Accept: application/json
-```
-
 **Notes:**
 
 - User input variables are processed **before** regular `{{varName}}` variables
-- Values are automatically URL-encoded when replaced in URLs
+- Values are automatically URL-encoded when replaced in URLs (not in headers/body)
+- Session values are scoped per URL pattern (different endpoints have separate values)
 - Session values are cleared with `restclient session clear`
 - Use `--no-session` to disable session storage entirely
 - Use `--use-cached` to reuse previously entered values from the session

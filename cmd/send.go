@@ -304,13 +304,15 @@ func runSend(cmd *cobra.Command, args []string) error {
 		}
 
 		inputPrompter := userinput.NewPrompter(sessionMgr, !useCached, useColors())
+
+		// Process user input patterns in URL
 		if inputPrompter.HasPatterns(request.URL) {
 			result, err := inputPrompter.ProcessURL(request.URL)
 			if err != nil {
 				if errors.Is(err, errors.ErrCanceled) {
 					return nil
 				}
-				return errors.Wrap(err, "failed to process user input variables")
+				return errors.Wrap(err, "failed to process user input variables in URL")
 			}
 			request.URL = result.URL
 
@@ -321,12 +323,71 @@ func runSend(cmd *cobra.Command, args []string) error {
 				}
 				fmt.Println()
 			}
+		}
 
-			// Save session with new user input values
-			if err := sessionMgr.Save(); err != nil {
-				if verbose {
-					fmt.Fprintf(os.Stderr, "Warning: failed to save session: %v\n", err)
+		// Generate URL key for session storage (used for headers and body)
+		urlKey := inputPrompter.GenerateKey(request.URL)
+
+		// Process user input patterns in headers
+		for k, v := range request.Headers {
+			if inputPrompter.HasPatterns(v) {
+				processedValue, err := inputPrompter.ProcessContent(v, urlKey)
+				if err != nil {
+					if errors.Is(err, errors.ErrCanceled) {
+						return nil
+					}
+					return errors.Wrapf(err, "failed to process user input variables in header %s", k)
 				}
+				request.Headers[k] = processedValue
+			}
+		}
+
+		// Process user input patterns in body
+		if request.RawBody != "" && inputPrompter.HasPatterns(request.RawBody) {
+			processedBody, err := inputPrompter.ProcessContent(request.RawBody, urlKey)
+			if err != nil {
+				if errors.Is(err, errors.ErrCanceled) {
+					return nil
+				}
+				return errors.Wrap(err, "failed to process user input variables in body")
+			}
+			request.RawBody = processedBody
+			request.Body = strings.NewReader(request.RawBody)
+		}
+
+		// Process user input patterns in multipart parts
+		for i, part := range request.MultipartParts {
+			if part.IsFile {
+				// Process file path patterns
+				if inputPrompter.HasPatterns(part.FilePath) {
+					processedPath, err := inputPrompter.ProcessContent(part.FilePath, urlKey)
+					if err != nil {
+						if errors.Is(err, errors.ErrCanceled) {
+							return nil
+						}
+						return errors.Wrapf(err, "failed to process user input variables in multipart file path %s", part.Name)
+					}
+					request.MultipartParts[i].FilePath = processedPath
+				}
+			} else {
+				// Process text field value patterns
+				if inputPrompter.HasPatterns(part.Value) {
+					processedValue, err := inputPrompter.ProcessContent(part.Value, urlKey)
+					if err != nil {
+						if errors.Is(err, errors.ErrCanceled) {
+							return nil
+						}
+						return errors.Wrapf(err, "failed to process user input variables in multipart field %s", part.Name)
+					}
+					request.MultipartParts[i].Value = processedValue
+				}
+			}
+		}
+
+		// Save session with new user input values
+		if err := sessionMgr.Save(); err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "Warning: failed to save session: %v\n", err)
 			}
 		}
 	}

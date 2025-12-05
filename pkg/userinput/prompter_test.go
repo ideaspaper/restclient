@@ -460,3 +460,604 @@ func TestProcessResult_EmptyValues(t *testing.T) {
 		t.Errorf("ProcessURL() Values[id] = %v, want empty string", result.Values["id"])
 	}
 }
+
+func TestPrompter_ProcessContent_MultipartFieldValues(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// Pre-populate session with values
+	urlKey := "api.example.com/upload"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"username":    "john_doe",
+		"description": "My file",
+		"tag":         "important",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "simple field value",
+			content: "{{:username}}",
+			want:    "john_doe",
+		},
+		{
+			name:    "field value with surrounding text",
+			content: "Uploaded by {{:username}}",
+			want:    "Uploaded by john_doe",
+		},
+		{
+			name:    "multiple patterns in field value",
+			content: "{{:description}} - tagged as {{:tag}}",
+			want:    "My file - tagged as important",
+		},
+		{
+			name:    "field value without patterns",
+			content: "static value",
+			want:    "static value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := p.ProcessContent(tt.content, urlKey)
+			if err != nil {
+				t.Errorf("ProcessContent() error = %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("ProcessContent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPrompter_ProcessContent_SharedValuesAcrossFields(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// Pre-populate session with values - simulating values used across URL, headers, body, and multipart
+	urlKey := "api.example.com/users/{{:userId}}"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"userId":   "42",
+		"username": "john",
+		"token":    "abc123",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// Simulate processing different parts of a request that share the same urlKey
+	// This mimics how URL, headers, body, and multipart all use the same session values
+
+	// URL pattern
+	urlResult, err := p.ProcessURL("https://api.example.com/users/{{:userId}}")
+	if err != nil {
+		t.Fatalf("ProcessURL() error = %v", err)
+	}
+	if urlResult.URL != "https://api.example.com/users/42" {
+		t.Errorf("URL = %v, want https://api.example.com/users/42", urlResult.URL)
+	}
+
+	// Header value
+	headerValue, err := p.ProcessContent("Bearer {{:token}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent(header) error = %v", err)
+	}
+	if headerValue != "Bearer abc123" {
+		t.Errorf("Header = %v, want Bearer abc123", headerValue)
+	}
+
+	// Body content
+	bodyContent, err := p.ProcessContent(`{"user": "{{:username}}", "id": "{{:userId}}"}`, urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent(body) error = %v", err)
+	}
+	if bodyContent != `{"user": "john", "id": "42"}` {
+		t.Errorf("Body = %v, want {\"user\": \"john\", \"id\": \"42\"}", bodyContent)
+	}
+
+	// Multipart field value
+	multipartValue, err := p.ProcessContent("Created by {{:username}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent(multipart) error = %v", err)
+	}
+	if multipartValue != "Created by john" {
+		t.Errorf("Multipart = %v, want Created by john", multipartValue)
+	}
+}
+
+// Edge Case Tests
+
+func TestPrompter_ProcessContent_PatternInHeaderButNotInURL(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// URL has no patterns, but we store values for headers
+	urlKey := "api.example.com/profile"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"token": "secret-token-123",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// URL without patterns - should return as-is
+	url := "https://api.example.com/profile"
+	urlResult, err := p.ProcessURL(url)
+	if err != nil {
+		t.Fatalf("ProcessURL() error = %v", err)
+	}
+	if urlResult.URL != url {
+		t.Errorf("URL = %v, want %v", urlResult.URL, url)
+	}
+	if len(urlResult.Patterns) != 0 {
+		t.Errorf("Patterns count = %v, want 0", len(urlResult.Patterns))
+	}
+
+	// Header with pattern - should use stored value
+	headerValue, err := p.ProcessContent("Bearer {{:token}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent() error = %v", err)
+	}
+	if headerValue != "Bearer secret-token-123" {
+		t.Errorf("Header = %v, want Bearer secret-token-123", headerValue)
+	}
+}
+
+func TestPrompter_ProcessContent_PatternInBodyButNotInURL(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// URL has no patterns, but we store values for body
+	urlKey := "api.example.com/login"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"username": "admin",
+		"password": "secret",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// Body with patterns - should use stored values
+	body := `{"username": "{{:username}}", "password": "{{:password}}"}`
+	processedBody, err := p.ProcessContent(body, urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent() error = %v", err)
+	}
+	expected := `{"username": "admin", "password": "secret"}`
+	if processedBody != expected {
+		t.Errorf("Body = %v, want %v", processedBody, expected)
+	}
+}
+
+func TestPrompter_SameParameterSharedAcrossURLAndHeaders(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// Same parameter name used in both URL and header
+	urlKey := "api.example.com/users/{{:id}}"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"id": "42",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// URL with pattern
+	urlResult, err := p.ProcessURL("https://api.example.com/users/{{:id}}")
+	if err != nil {
+		t.Fatalf("ProcessURL() error = %v", err)
+	}
+	if urlResult.URL != "https://api.example.com/users/42" {
+		t.Errorf("URL = %v, want https://api.example.com/users/42", urlResult.URL)
+	}
+
+	// Header with same parameter - should use same value
+	headerValue, err := p.ProcessContent("X-Request-Id: {{:id}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent() error = %v", err)
+	}
+	if headerValue != "X-Request-Id: 42" {
+		t.Errorf("Header = %v, want X-Request-Id: 42", headerValue)
+	}
+
+	// Body with same parameter - should use same value
+	body, err := p.ProcessContent(`{"requestId": "{{:id}}"}`, urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent() error = %v", err)
+	}
+	if body != `{"requestId": "42"}` {
+		t.Errorf("Body = %v, want {\"requestId\": \"42\"}", body)
+	}
+}
+
+func TestPrompter_EmptyStringValue(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// Use the correct URL key that matches what GenerateKey would produce
+	urlKey := "api.example.com/search?q={{:query}}"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"query": "", // Empty string
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// URL with empty value
+	urlResult, err := p.ProcessURL("https://api.example.com/search?q={{:query}}")
+	if err != nil {
+		t.Fatalf("ProcessURL() error = %v", err)
+	}
+	// Empty value should result in empty parameter
+	if urlResult.URL != "https://api.example.com/search?q=" {
+		t.Errorf("URL = %v, want https://api.example.com/search?q=", urlResult.URL)
+	}
+
+	// Body with empty value
+	body, err := p.ProcessContent(`{"filter": "{{:query}}"}`, urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent() error = %v", err)
+	}
+	if body != `{"filter": ""}` {
+		t.Errorf("Body = %v, want {\"filter\": \"\"}", body)
+	}
+}
+
+func TestPrompter_SpecialCharactersInBody(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	urlKey := "api.example.com/message"
+
+	tests := []struct {
+		name  string
+		value string
+		body  string
+		want  string
+	}{
+		{
+			name:  "value with double quotes",
+			value: `Hello "world"`,
+			body:  `{"message": "{{:msg}}"}`,
+			want:  `{"message": "Hello "world""}`, // Invalid JSON - user responsibility
+		},
+		{
+			name:  "value with newlines",
+			value: "line1\nline2",
+			body:  `{"text": "{{:msg}}"}`,
+			want:  "{\"text\": \"line1\nline2\"}", // Raw newline in JSON
+		},
+		{
+			name:  "value with backslash",
+			value: `path\to\file`,
+			body:  `{"path": "{{:msg}}"}`,
+			want:  `{"path": "path\to\file"}`,
+		},
+		{
+			name:  "value with unicode",
+			value: "日本語テスト",
+			body:  `{"text": "{{:msg}}"}`,
+			want:  `{"text": "日本語テスト"}`,
+		},
+		{
+			name:  "value with emoji",
+			value: "Hello 👋 World 🌍",
+			body:  `{"greeting": "{{:msg}}"}`,
+			want:  `{"greeting": "Hello 👋 World 🌍"}`,
+		},
+		{
+			name:  "value with HTML tags",
+			value: "<script>alert('xss')</script>",
+			body:  `{"html": "{{:msg}}"}`,
+			want:  `{"html": "<script>alert('xss')</script>"}`,
+		},
+		{
+			name:  "value with SQL injection attempt",
+			value: "'; DROP TABLE users; --",
+			body:  `{"query": "{{:msg}}"}`,
+			want:  `{"query": "'; DROP TABLE users; --"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sm.SetUserInputs(urlKey, map[string]string{"msg": tt.value})
+			p := NewPrompter(sm, false, false)
+
+			result, err := p.ProcessContent(tt.body, urlKey)
+			if err != nil {
+				t.Fatalf("ProcessContent() error = %v", err)
+			}
+			if result != tt.want {
+				t.Errorf("ProcessContent() = %v, want %v", result, tt.want)
+			}
+		})
+	}
+}
+
+func TestPrompter_ContentTypeHeaderWithPattern(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	urlKey := "api.example.com/upload"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"contentType": "application/json",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// Content-Type header with pattern
+	headerValue, err := p.ProcessContent("{{:contentType}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent() error = %v", err)
+	}
+	if headerValue != "application/json" {
+		t.Errorf("Header = %v, want application/json", headerValue)
+	}
+}
+
+func TestPrompter_URLEncodingVsRawReplacement(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	urlKey := "api.example.com/test/{{:value}}"
+	valueWithSpaces := "hello world"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"value": valueWithSpaces,
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// URL should be URL-encoded
+	urlResult, err := p.ProcessURL("https://api.example.com/test/{{:value}}")
+	if err != nil {
+		t.Fatalf("ProcessURL() error = %v", err)
+	}
+	if urlResult.URL != "https://api.example.com/test/hello%20world" {
+		t.Errorf("URL = %v, want https://api.example.com/test/hello%%20world", urlResult.URL)
+	}
+
+	// Header should NOT be URL-encoded
+	headerValue, err := p.ProcessContent("X-Value: {{:value}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent(header) error = %v", err)
+	}
+	if headerValue != "X-Value: hello world" {
+		t.Errorf("Header = %v, want X-Value: hello world", headerValue)
+	}
+
+	// Body should NOT be URL-encoded
+	body, err := p.ProcessContent(`{"value": "{{:value}}"}`, urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent(body) error = %v", err)
+	}
+	if body != `{"value": "hello world"}` {
+		t.Errorf("Body = %v, want {\"value\": \"hello world\"}", body)
+	}
+}
+
+func TestPrompter_DifferentSessionKeysForDifferentURLs(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	// Two different URLs with same parameter name but different values
+	urlKey1 := "api.example.com/users/{{:id}}"
+	urlKey2 := "api.example.com/posts/{{:id}}"
+
+	sm.SetUserInputs(urlKey1, map[string]string{"id": "user-42"})
+	sm.SetUserInputs(urlKey2, map[string]string{"id": "post-99"})
+
+	p := NewPrompter(sm, false, false)
+
+	// First URL
+	result1, err := p.ProcessURL("https://api.example.com/users/{{:id}}")
+	if err != nil {
+		t.Fatalf("ProcessURL() error = %v", err)
+	}
+	if result1.URL != "https://api.example.com/users/user-42" {
+		t.Errorf("URL1 = %v, want https://api.example.com/users/user-42", result1.URL)
+	}
+
+	// Second URL - should have different value
+	result2, err := p.ProcessURL("https://api.example.com/posts/{{:id}}")
+	if err != nil {
+		t.Fatalf("ProcessURL() error = %v", err)
+	}
+	if result2.URL != "https://api.example.com/posts/post-99" {
+		t.Errorf("URL2 = %v, want https://api.example.com/posts/post-99", result2.URL)
+	}
+}
+
+func TestPrompter_MultiplePatternsSameNameInContent(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	urlKey := "api.example.com/test"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"id": "123",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// Same pattern used multiple times in body
+	body := `{"id": "{{:id}}", "relatedId": "{{:id}}", "refId": "{{:id}}"}`
+	result, err := p.ProcessContent(body, urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent() error = %v", err)
+	}
+	expected := `{"id": "123", "relatedId": "123", "refId": "123"}`
+	if result != expected {
+		t.Errorf("Body = %v, want %v", result, expected)
+	}
+}
+
+func TestPrompter_FormURLEncodedBody(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	urlKey := "api.example.com/login"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"username": "john",
+		"password": "secret123",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// Form URL-encoded body
+	body := `username={{:username}}&password={{:password}}`
+	result, err := p.ProcessContent(body, urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent() error = %v", err)
+	}
+	expected := `username=john&password=secret123`
+	if result != expected {
+		t.Errorf("Body = %v, want %v", result, expected)
+	}
+}
+
+func TestPrompter_MultipartFieldValue(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	urlKey := "api.example.com/upload"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"description": "My awesome file",
+		"tags":        "important,urgent",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// Multipart text field values
+	desc, err := p.ProcessContent("{{:description}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent(description) error = %v", err)
+	}
+	if desc != "My awesome file" {
+		t.Errorf("Description = %v, want My awesome file", desc)
+	}
+
+	tags, err := p.ProcessContent("{{:tags}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent(tags) error = %v", err)
+	}
+	if tags != "important,urgent" {
+		t.Errorf("Tags = %v, want important,urgent", tags)
+	}
+}
+
+func TestPrompter_MultipartFilePath(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	urlKey := "api.example.com/upload"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"filePath": "/home/user/documents/report.pdf",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// File path with pattern - should be processed with ReplaceRaw (no encoding)
+	filePath, err := p.ProcessContent("{{:filePath}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent(filePath) error = %v", err)
+	}
+	if filePath != "/home/user/documents/report.pdf" {
+		t.Errorf("FilePath = %v, want /home/user/documents/report.pdf", filePath)
+	}
+}
+
+func TestPrompter_MultipartFilePathWithSpaces(t *testing.T) {
+	tempDir := t.TempDir()
+
+	mockFS := filesystem.NewMockFileSystem()
+	sm, err := session.NewSessionManagerWithFS(mockFS, tempDir, "", "test")
+	if err != nil {
+		t.Fatalf("NewSessionManager() error = %v", err)
+	}
+
+	urlKey := "api.example.com/upload"
+	sm.SetUserInputs(urlKey, map[string]string{
+		"filePath": "/home/user/My Documents/report.pdf",
+	})
+
+	p := NewPrompter(sm, false, false)
+
+	// File path with spaces - should NOT be URL encoded
+	filePath, err := p.ProcessContent("{{:filePath}}", urlKey)
+	if err != nil {
+		t.Fatalf("ProcessContent(filePath) error = %v", err)
+	}
+	if filePath != "/home/user/My Documents/report.pdf" {
+		t.Errorf("FilePath = %v, want /home/user/My Documents/report.pdf", filePath)
+	}
+}

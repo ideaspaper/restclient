@@ -160,7 +160,8 @@ func (p *Prompter) ProcessContent(content string, urlKey string) (string, error)
 		values = storedValues
 	}
 
-	processedContent := p.detector.Replace(content, values)
+	// Use ReplaceRaw for content (headers, body, multipart) - no URL encoding needed
+	processedContent := p.detector.ReplaceRaw(content, values)
 	return processedContent, nil
 }
 
