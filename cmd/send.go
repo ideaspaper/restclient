@@ -69,7 +69,7 @@ var (
 	sessionName  string
 	noSession    bool
 	strictMode   bool
-	forcePrompt  bool
+	useCached    bool
 )
 
 // sendCmd represents the send command
@@ -123,7 +123,7 @@ func init() {
 	sendCmd.Flags().StringVar(&sessionName, "session", "", "use named session instead of directory-based session")
 	sendCmd.Flags().BoolVar(&noSession, "no-session", false, "don't load or save session state (cookies and variables)")
 	sendCmd.Flags().BoolVar(&strictMode, "strict", false, "error on duplicate @name values instead of warning")
-	sendCmd.Flags().BoolVarP(&forcePrompt, "force-prompt", "p", false, "force prompting for user input values ({{:paramName}})")
+	sendCmd.Flags().BoolVar(&useCached, "use-cached", false, "use cached session values for user input ({{:paramName}}) instead of prompting")
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -303,7 +303,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		inputPrompter := userinput.NewPrompter(sessionMgr, forcePrompt, useColors())
+		inputPrompter := userinput.NewPrompter(sessionMgr, !useCached, useColors())
 		if inputPrompter.HasPatterns(request.URL) {
 			result, err := inputPrompter.ProcessURL(request.URL)
 			if err != nil {

@@ -148,7 +148,7 @@ restclient send [file.http] [flags]
 | `--session` | | Use a named session instead of directory-based |
 | `--no-session` | | Don't load or save session state |
 | `--strict` | | Error on duplicate `@name` values instead of warning |
-| `--force-prompt` | `-p` | Force prompting for user input values (`{{:paramName}}`) |
+| `--use-cached` | | Use cached session values for user input (`{{:paramName}}`) instead of prompting |
 
 **Examples:**
 
@@ -704,7 +704,7 @@ GET https://api.example.com/search?q={{%searchTerm}}
 
 ### User Input Variables
 
-User input variables use the `{{:paramName}}` syntax and are ideal for dynamic path parameters and query parameters. On first use, you'll be prompted to enter values. These values are persisted in your session and reused automatically on subsequent requests.
+User input variables use the `{{:paramName}}` syntax and are ideal for dynamic path parameters and query parameters. By default, you'll be prompted to enter values each time you run a request. Values are saved to your session and can be reused with the `--use-cached` flag.
 
 **Syntax:**
 
@@ -718,25 +718,25 @@ GET https://api.example.com/posts?page={{:page}}&limit={{:limit}}
 
 **Features:**
 
-- **Interactive prompting**: First run prompts for all undefined parameters via a TUI form
-- **Session persistence**: Values are saved and reused automatically
-- **Force re-prompting**: Use `--force-prompt` or `-p` flag to re-enter values
+- **Interactive prompting**: Each run prompts for all parameters via a TUI form (default behavior)
+- **Session persistence**: Values are saved to session for optional reuse
+- **Use cached values**: Use `--use-cached` flag to skip prompting and reuse session values
 - **Unique per URL pattern**: Different endpoints maintain separate values
 - **Duplicate handling**: Same parameter name used multiple times prompts once
 
 **Examples:**
 
 ```bash
-# First run - prompts for :id value
+# Prompts for :id value (default behavior)
 restclient send api.http --name getPostById
 # Enter value for id: 123
 
-# Second run - uses cached value (id=123)
+# Prompts again for new value (default behavior)
 restclient send api.http --name getPostById
-
-# Force re-prompting to change values
-restclient send api.http --name getPostById --force-prompt
 # Enter value for id: 456
+
+# Use cached value from session (id=456)
+restclient send api.http --name getPostById --use-cached
 ```
 
 **Request File Example:**
@@ -765,7 +765,8 @@ Accept: application/json
 - User input variables are processed **before** regular `{{varName}}` variables
 - Values are automatically URL-encoded when replaced in URLs
 - Session values are cleared with `restclient session clear`
-- Use `--no-session` to disable session storage (always prompts)
+- Use `--no-session` to disable session storage entirely
+- Use `--use-cached` to reuse previously entered values from the session
 
 ## Scripting
 
