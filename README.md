@@ -611,6 +611,8 @@ GET {{baseUrl}}/users
 Authorization: Bearer {{token}}
 ```
 
+> **Strict resolution:** file variables must resolve successfully. Missing or misspelled variable names now stop the request with a validation error instead of rendering placeholders in the output.
+
 ### Environment Variables
 
 Variables defined in environments via `restclient env set`:
@@ -619,6 +621,8 @@ Variables defined in environments via `restclient env set`:
 GET {{API_URL}}/users
 Authorization: Bearer {{API_KEY}}
 ```
+
+If a variable is missing from the active environment (or `$shared`), processing now fails with a descriptive error so you can fix the config before sending the request.
 
 ### System Variables
 
@@ -635,6 +639,8 @@ Authorization: Bearer {{API_KEY}}
 | `{{$dotenv VAR}}`                  | Variable from `.env` file | `{{$dotenv DATABASE_URL}}`              |
 | `{{$prompt name}}`                 | Prompt for input          | `{{$prompt username}}`                  |
 | `{{$prompt name description}}`     | Prompt with description   | `{{$prompt apiKey Enter your API key}}` |
+
+> **Note:** `$prompt` now requires a prompt handler. When none is configured (e.g., during CI runs), resolution fails instead of leaving the placeholder in the request.
 
 **Datetime Formats:**
 
@@ -693,6 +699,8 @@ Authorization: Bearer {{login.response.body.$.token}}
 
 - `{{requestName.response.body.$.jsonPath}}` - Extract from JSON response
 - `{{requestName.response.headers.Header-Name}}` - Extract response header
+
+If the referenced request or path is missing, resolution fails immediately so you can fix chaining issues before the HTTP call.
 
 ### URL Encoding
 
@@ -1267,13 +1275,12 @@ GET https://api.example.com
 
 ### Variable Not Resolved
 
-```
-{{variableName}} appears in output
-```
+Variables now resolve strictly, so missing values stop execution before any request is sent.
 
-1. Check if the variable is defined in file variables or environment
+1. Check if the variable is defined in file variables, the active environment, or `$shared`
 2. Verify the current environment with `restclient env current`
 3. Check variable spelling (case-sensitive)
+4. Ensure `$prompt` variables have a handler available (TTY session or `--use-cached`)
 
 ### Request Validation Errors
 

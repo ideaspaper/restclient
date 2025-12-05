@@ -3,8 +3,10 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -203,6 +205,79 @@ func TestExecutor_ExecuteWithContext(t *testing.T) {
 			t.Errorf("Execute() StatusCode = %v, want %v", result.Response.StatusCode, http.StatusOK)
 		}
 	})
+}
+
+func TestExecutor_ExecuteWithContext_PreCancelled(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{RememberCookies: false}
+	varProcessor := variables.NewVariableProcessor()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	exec := New(cfg, varProcessor, Options{NoSession: true, NoHistory: true})
+	request := &models.HttpRequest{
+		Method:  "GET",
+		URL:     server.URL,
+		Headers: map[string]string{},
+	}
+
+	_, err := exec.ExecuteWithContext(ctx, request)
+	if err == nil {
+		t.Fatal("expected error for pre-cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation error, got %v", err)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("expected no requests to be sent, got %d", hits.Load())
+	}
+}
+
+func TestExecutor_PostScriptCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{RememberCookies: false}
+	varProcessor := variables.NewVariableProcessor()
+	exec := New(cfg, varProcessor, Options{NoSession: true, NoHistory: true})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	req := &models.HttpRequest{
+		Method:  "GET",
+		URL:     server.URL,
+		Headers: map[string]string{},
+		Metadata: models.RequestMetadata{
+			PostScript: `
+				while (true) {
+					// wait for cancellation
+				}
+			`,
+		},
+	}
+
+	_, err := exec.ExecuteWithContext(ctx, req)
+	if err == nil {
+		t.Fatal("expected error due to post-script cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation error, got %v", err)
+	}
 }
 
 func TestExecutor_WithPostScript(t *testing.T) {

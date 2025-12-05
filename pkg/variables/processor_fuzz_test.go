@@ -36,7 +36,6 @@ func FuzzProcess(f *testing.F) {
 			"encodedVar": "hello world",
 		})
 
-		// Should not panic
 		_, _ = vp.Process(input)
 	})
 }

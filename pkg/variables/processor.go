@@ -115,12 +115,10 @@ func (v *VariableProcessor) Process(text string) (string, error) {
 		varName := strings.TrimSpace(text[match[2]:match[3]])
 		value, err := v.resolveVariable(varName)
 		if err != nil {
-			// Keep original if cannot resolve
-			builder.WriteString(text[match[0]:match[1]])
-		} else {
-			builder.WriteString(value)
+			return "", errors.Wrapf(err, "failed to resolve variable %s", varName)
 		}
 
+		builder.WriteString(value)
 		lastIndex = match[1]
 	}
 	builder.WriteString(text[lastIndex:])
@@ -129,49 +127,59 @@ func (v *VariableProcessor) Process(text string) (string, error) {
 }
 
 // resolveVariable resolves a single variable
-func (v *VariableProcessor) resolveVariable(name string) (string, error) {
-	// Check cache first
-	if val, ok := v.resolvedCache[name]; ok {
+func (v *VariableProcessor) resolveVariable(rawName string) (string, error) {
+	key := strings.TrimSpace(rawName)
+	if key == "" {
+		return "", errors.NewValidationError("variable", "empty variable name")
+	}
+
+	if val, ok := v.resolvedCache[key]; ok {
 		return val, nil
 	}
 
-	// Check if it's URL-encoded variable reference
-	isEncoded := strings.HasPrefix(name, "%")
+	isEncoded := strings.HasPrefix(key, "%")
+	name := key
 	if isEncoded {
-		name = name[1:]
+		name = key[1:]
+		if name == "" {
+			return "", errors.NewValidationError("variable", "url-encoded variable missing name")
+		}
 	}
 
 	var value string
 	var err error
 
-	// System variables (start with $)
-	if strings.HasPrefix(name, "$") {
+	switch {
+	case strings.HasPrefix(name, "$"):
 		value, err = v.resolveSystemVariable(name)
-	} else if strings.Contains(name, ".response.") || strings.Contains(name, ".request.") {
-		// Request variable
+	case strings.Contains(name, ".response.") || strings.Contains(name, ".request."):
 		value, err = v.resolveRequestVariable(name)
-	} else {
-		// Try file variables, then environment variables
-		if val, ok := v.fileVariables[name]; ok {
-			// Recursively resolve any variables in the file variable value
-			value, _ = v.Process(val)
-		} else {
-			value, err = v.resolveEnvironmentVariable(name)
-		}
+	default:
+		value, err = v.resolveFromScopes(name)
 	}
 
 	if err != nil {
 		return "", err
 	}
 
-	// URL encode if needed
 	if isEncoded {
 		value = urlEncode(value)
 	}
 
-	// Cache the result
-	v.resolvedCache[name] = value
+	v.resolvedCache[key] = value
 	return value, nil
+}
+
+func (v *VariableProcessor) resolveFromScopes(name string) (string, error) {
+	if val, ok := v.fileVariables[name]; ok {
+		resolved, err := v.Process(val)
+		if err != nil {
+			return "", errors.Wrapf(err, "failed to resolve file variable %s", name)
+		}
+		return resolved, nil
+	}
+
+	return v.resolveEnvironmentVariable(name)
 }
 
 // resolveSystemVariable resolves system variables like $guid, $timestamp, etc.
@@ -396,23 +404,27 @@ func (v *VariableProcessor) resolveEnvironmentVariable(name string) (string, err
 	// Check shared environment first
 	if shared, ok := v.envVariables["$shared"]; ok {
 		if val, ok := shared[name]; ok {
-			// Recursively resolve
-			resolved, _ := v.Process(val)
+			resolved, err := v.Process(val)
+			if err != nil {
+				return "", errors.Wrapf(err, "failed to resolve shared environment variable %s", name)
+			}
 			return resolved, nil
 		}
 	}
 
-	// Check current environment
 	if v.environment != "" {
 		if env, ok := v.envVariables[v.environment]; ok {
 			if val, ok := env[name]; ok {
-				resolved, _ := v.Process(val)
+				resolved, err := v.Process(val)
+				if err != nil {
+					return "", errors.Wrapf(err, "failed to resolve environment variable %s", name)
+				}
 				return resolved, nil
 			}
 		}
 	}
 
-	return "", errors.NewValidationErrorWithValue("environment variable", name, "not found")
+	return "", errors.NewValidationErrorWithValue("variable", name, "not found")
 }
 
 // resolveRequestVariable resolves a request variable (e.g., loginAPI.response.body.$.token)

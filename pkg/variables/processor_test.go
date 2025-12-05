@@ -15,9 +15,10 @@ func TestProcess(t *testing.T) {
 	})
 
 	tests := []struct {
-		name  string
-		input string
-		want  string
+		name    string
+		input   string
+		want    string
+		wantErr bool
 	}{
 		{
 			name:  "no variables",
@@ -40,18 +41,24 @@ func TestProcess(t *testing.T) {
 			want:  "https://api.example.com/users",
 		},
 		{
-			name:  "unknown variable kept as-is",
-			input: "{{unknown}}/users",
-			want:  "{{unknown}}/users",
+			name:    "unknown variable fails",
+			input:   "{{unknown}}/users",
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := vp.Process(tt.input)
-			if err != nil {
-				t.Errorf("Process() error = %v", err)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Process() expected error, got nil")
+				}
 				return
+			}
+
+			if err != nil {
+				t.Fatalf("Process() error = %v", err)
 			}
 			if got != tt.want {
 				t.Errorf("Process() = %v, want %v", got, tt.want)
@@ -142,16 +149,12 @@ func TestResolveSystemVariables(t *testing.T) {
 func TestResolvePromptVariable(t *testing.T) {
 	vp := NewVariableProcessor()
 
-	// Test without handler - should return error
 	t.Run("without handler", func(t *testing.T) {
-		got, _ := vp.Process("{{$prompt username}}")
-		// Should keep original since handler not set
-		if got != "{{$prompt username}}" {
-			t.Errorf("Without handler, should keep original, got: %v", got)
+		if _, err := vp.Process("{{$prompt username}}"); err == nil {
+			t.Fatal("expected error when prompt handler is missing")
 		}
 	})
 
-	// Test with handler
 	t.Run("with handler", func(t *testing.T) {
 		vp.SetPromptHandler(func(name, description string, isPassword bool) (string, error) {
 			if name == "username" {
@@ -169,7 +172,6 @@ func TestResolvePromptVariable(t *testing.T) {
 		}
 	})
 
-	// Test password detection
 	t.Run("password detection", func(t *testing.T) {
 		var detectedPassword bool
 		vp.SetPromptHandler(func(name, description string, isPassword bool) (string, error) {
@@ -177,13 +179,14 @@ func TestResolvePromptVariable(t *testing.T) {
 			return "secret", nil
 		})
 
-		vp.Process("{{$prompt password}}")
+		if _, err := vp.Process("{{$prompt password}}"); err != nil {
+			t.Fatalf("Process() error = %v", err)
+		}
 		if !detectedPassword {
 			t.Error("Should detect 'password' as password field")
 		}
 	})
 
-	// Test description
 	t.Run("with description", func(t *testing.T) {
 		var capturedDescription string
 		vp.SetPromptHandler(func(name, description string, isPassword bool) (string, error) {
@@ -191,7 +194,9 @@ func TestResolvePromptVariable(t *testing.T) {
 			return "value", nil
 		})
 
-		vp.Process("{{$prompt apiKey Enter your API key}}")
+		if _, err := vp.Process("{{$prompt apiKey Enter your API key}}"); err != nil {
+			t.Fatalf("Process() error = %v", err)
+		}
 		if capturedDescription != "Enter your API key" {
 			t.Errorf("Description should be 'Enter your API key', got: %v", capturedDescription)
 		}
@@ -214,9 +219,10 @@ func TestResolveEnvironmentVariables(t *testing.T) {
 	})
 
 	tests := []struct {
-		name  string
-		input string
-		want  string
+		name    string
+		input   string
+		want    string
+		wantErr bool
 	}{
 		{
 			name:  "environment variable",
@@ -228,14 +234,25 @@ func TestResolveEnvironmentVariables(t *testing.T) {
 			input: "{{version}}",
 			want:  "v1",
 		},
+		{
+			name:    "missing variable",
+			input:   "{{missing}}",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := vp.Process(tt.input)
-			if err != nil {
-				t.Errorf("Process() error = %v", err)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
 				return
+			}
+
+			if err != nil {
+				t.Fatalf("Process() error = %v", err)
 			}
 			if got != tt.want {
 				t.Errorf("Process() = %v, want %v", got, tt.want)

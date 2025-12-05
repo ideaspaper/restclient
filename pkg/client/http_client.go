@@ -36,7 +36,6 @@ type HTTPDoer interface {
 	ClearCookies()
 }
 
-// Ensure HttpClient implements HTTPDoer
 var _ HTTPDoer = (*HttpClient)(nil)
 
 // ClientConfig holds client configuration
@@ -110,7 +109,6 @@ func NewHttpClient(config *ClientConfig) (*HttpClient, error) {
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
-	// Configure proxy
 	if config.Proxy != "" {
 		proxyURL, err := url.Parse(config.Proxy)
 		if err != nil {
@@ -221,7 +219,14 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 	if err != nil {
 		return nil, errors.NewRequestErrorWithURL("send", request.Method, request.URL, err)
 	}
-	defer resp.Body.Close()
+
+	// Close the response via helper so digest retries share logic
+	closeResponse := func(r *http.Response) {
+		if r != nil && r.Body != nil {
+			r.Body.Close()
+		}
+	}
+	defer closeResponse(resp)
 
 	timing.Total = time.Since(startTime)
 
@@ -232,20 +237,12 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 			// Retry with digest auth if we have credentials
 			digestResp, digestErr := c.handleDigestAuth(ctx, request, resp, authHeader)
 			if digestErr == nil && digestResp != resp {
-				// Close the original response body before replacing
-				resp.Body.Close()
+				closeResponse(resp)
 				resp = digestResp
-				// Note: the new response body will be closed by the defer above
-				// since we reassigned resp
+				defer closeResponse(resp)
 			} else if digestErr != nil {
-				// Close the digest response if it's different from original and we got an error
-				if digestResp != nil && digestResp != resp {
-					digestResp.Body.Close()
-				}
-				if _, hasCredentials := c.authProcessor.GetDigestCredentials(request.URL); hasCredentials {
-					// Log warning if retry failed but credentials were provided
-					fmt.Fprintf(os.Stderr, "Warning: digest auth retry failed: %v\n", digestErr)
-				}
+				closeResponse(digestResp)
+				return nil, errors.NewRequestErrorWithURL("digest", request.Method, request.URL, digestErr)
 			}
 		}
 	}
@@ -256,10 +253,11 @@ func (c *HttpClient) SendWithContext(ctx context.Context, request *models.HttpRe
 	// Handle gzip encoding
 	if resp.Header.Get(constants.HeaderContentEncoding) == "gzip" {
 		gzReader, err := gzip.NewReader(resp.Body)
-		if err == nil {
-			reader = gzReader
-			defer gzReader.Close()
+		if err != nil {
+			return nil, errors.NewRequestErrorWithURL("gzip", request.Method, request.URL, err)
 		}
+		reader = gzReader
+		defer gzReader.Close()
 	}
 
 	_, err = io.Copy(&bodyBuffer, reader)

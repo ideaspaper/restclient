@@ -1,6 +1,7 @@
 package scripting
 
 import (
+	"context"
 	"regexp"
 	"testing"
 
@@ -649,5 +650,44 @@ func TestRandomStringFunction(t *testing.T) {
 	alphanumRegex := regexp.MustCompile(`^[a-zA-Z0-9]+$`)
 	if !alphanumRegex.MatchString(s1) {
 		t.Errorf("Expected alphanumeric string, got '%s'", s1)
+	}
+}
+
+func TestEngineExecuteWithContextCancellation(t *testing.T) {
+	engine := NewEngine()
+	ctx := NewScriptContext()
+	ctx.SetRequest(&models.HttpRequest{
+		Method: "GET",
+		URL:    "https://example.com",
+	})
+
+	script := `
+		while (true) {
+			// busy loop
+		}
+	`
+
+	testCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := engine.ExecuteWithContext(testCtx, script, ctx)
+	if err == nil {
+		t.Fatal("expected cancellation error")
+	}
+
+	if err != nil && err.Error() != "script execution canceled: context canceled" {
+		// Accept wrapped context cancellation errors
+		if !regexp.MustCompile(`context canceled`).MatchString(err.Error()) {
+			t.Fatalf("expected context cancellation, got %v", err)
+		}
+	}
+
+	// Ensure we can run another script after cancellation without interference
+	result, err := engine.Execute("client.log('ok');", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error after cancellation: %v", err)
+	}
+	if len(result.Logs) != 1 {
+		t.Fatalf("expected one log, got %d", len(result.Logs))
 	}
 }

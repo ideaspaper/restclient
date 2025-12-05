@@ -22,10 +22,6 @@ test-coverage:
 	go test -v -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 
-# Lint the code
-lint:
-	golangci-lint run
-
 # Clean build artifacts
 clean:
 	rm -f $(BINARY_NAME)

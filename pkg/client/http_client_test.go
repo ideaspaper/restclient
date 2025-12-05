@@ -259,22 +259,20 @@ func TestBasicAuth(t *testing.T) {
 }
 
 func TestCookieJar(t *testing.T) {
-	visits := 0
+	t.Parallel()
+
+	var visits int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		visits++
 		if visits == 1 {
 			// First visit: set cookie
-			http.SetCookie(w, &http.Cookie{
-				Name:  "session",
-				Value: "abc123",
-			})
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc123"})
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		// Second visit: check cookie
 		cookie, err := r.Cookie("session")
-		if err != nil || cookie.Value != "abc123" {
-			t.Error("Cookie not remembered")
+		if err != nil || cookie.Value == "" {
+			t.Fatalf("expected session cookie, got err=%v value=%v", err, cookie)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -282,18 +280,31 @@ func TestCookieJar(t *testing.T) {
 
 	client, _ := NewHttpClient(nil)
 
-	// First request
-	req1 := models.NewHttpRequest("GET", server.URL+"/set-cookie", make(map[string]string), nil, "", "")
-	_, err := client.Send(req1)
-	if err != nil {
-		t.Fatalf("First Send() error = %v", err)
+	req := models.NewHttpRequest("GET", server.URL+"/set-cookie", make(map[string]string), nil, "", "")
+	if _, err := client.Send(req); err != nil {
+		t.Fatalf("Send() error = %v", err)
 	}
 
-	// Second request should have cookie
-	req2 := models.NewHttpRequest("GET", server.URL+"/check-cookie", make(map[string]string), nil, "", "")
-	_, err = client.Send(req2)
+	cookies := client.GetCookies(server.URL)
+	if len(cookies) != 1 || cookies[0].Name != "session" {
+		t.Fatalf("expected session cookie, got %v", cookies)
+	}
+
+	client.ClearCookies()
+	if cookies := client.GetCookies(server.URL); len(cookies) != 0 {
+		t.Fatalf("expected cookies cleared, got %v", cookies)
+	}
+
+	restored := &http.Cookie{Name: "session", Value: "restored"}
+	client.SetCookies(server.URL, []*http.Cookie{restored})
+
+	req = models.NewHttpRequest("GET", server.URL+"/check-cookie", make(map[string]string), nil, "", "")
+	resp, err := client.Send(req)
 	if err != nil {
-		t.Fatalf("Second Send() error = %v", err)
+		t.Fatalf("Send() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("StatusCode = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -303,6 +314,26 @@ func TestClearCookies(t *testing.T) {
 
 	if client.cookieJar == nil {
 		t.Error("ClearCookies() should create a new cookie jar")
+	}
+}
+
+func TestRememberCookiesDisabled(t *testing.T) {
+	config := DefaultConfig()
+	config.RememberCookies = false
+	client, _ := NewHttpClient(config)
+
+	req := models.NewHttpRequest("GET", "http://example.com", make(map[string]string), nil, "", "")
+
+	cookiesBefore := client.GetCookies(req.URL)
+	if len(cookiesBefore) != 0 {
+		t.Fatalf("expected no cookies when jar disabled, got %v", cookiesBefore)
+	}
+
+	client.SetCookies(req.URL, []*http.Cookie{{Name: "foo", Value: "bar"}})
+
+	cookiesAfter := client.GetCookies(req.URL)
+	if len(cookiesAfter) != 0 {
+		t.Fatalf("expected no cookies stored when jar disabled, got %v", cookiesAfter)
 	}
 }
 
@@ -475,17 +506,62 @@ func TestInvalidProxyURL(t *testing.T) {
 	}
 }
 
-func TestValidProxyURL(t *testing.T) {
+func TestProxyExclusion(t *testing.T) {
 	config := &ClientConfig{
-		Proxy: "http://proxy.example.com:8080",
+		Proxy:        "http://proxy.example.com:8080",
+		ExcludeProxy: []string{"localhost", "api.example.com"},
 	}
 
 	client, err := NewHttpClient(config)
 	if err != nil {
 		t.Fatalf("NewHttpClient() error = %v", err)
 	}
-	if client == nil {
-		t.Fatal("NewHttpClient() returned nil client")
+
+	transport, ok := client.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("transport is not *http.Transport")
+	}
+
+	tests := []struct {
+		name      string
+		request   *http.Request
+		wantProxy bool
+	}{
+		{
+			name:      "non-excluded host uses proxy",
+			request:   httptest.NewRequest("GET", "http://example.org", nil),
+			wantProxy: true,
+		},
+		{
+			name:      "direct match excluded",
+			request:   httptest.NewRequest("GET", "http://localhost", nil),
+			wantProxy: false,
+		},
+		{
+			name:      "exact domain excluded",
+			request:   httptest.NewRequest("GET", "http://api.example.com", nil),
+			wantProxy: false,
+		},
+		{
+			name:      "subdomain excluded",
+			request:   httptest.NewRequest("GET", "http://sub.api.example.com", nil),
+			wantProxy: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proxyURL, err := transport.Proxy(tt.request)
+			if err != nil {
+				t.Fatalf("Proxy() error = %v", err)
+			}
+			if tt.wantProxy && proxyURL == nil {
+				t.Fatalf("expected proxy for %s", tt.request.URL)
+			}
+			if !tt.wantProxy && proxyURL != nil {
+				t.Fatalf("expected proxy to be skipped for %s", tt.request.URL)
+			}
+		})
 	}
 }
 
@@ -665,6 +741,15 @@ func TestMultipartFileUpload(t *testing.T) {
 }
 
 // TestMultipartWithCustomContentType tests file upload with explicit content type
+func readAllCookies(t *testing.T, r *http.Request) []*http.Cookie {
+	t.Helper()
+	cookies := r.Cookies()
+	if cookies == nil {
+		return []*http.Cookie{}
+	}
+	return cookies
+}
+
 func TestMultipartWithCustomContentType(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "data.json")
@@ -754,6 +839,26 @@ func TestGzipResponseDecoding(t *testing.T) {
 	}
 }
 
+func TestGzipResponseInvalidStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(constants.HeaderContentEncoding, "gzip")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("not-gzip"))
+	}))
+	defer server.Close()
+
+	client, _ := NewHttpClient(nil)
+	req := models.NewHttpRequest("GET", server.URL+"/gzip", make(map[string]string), nil, "", "")
+
+	_, err := client.Send(req)
+	if err == nil {
+		t.Fatal("Send() should fail for invalid gzip stream")
+	}
+	if !strings.Contains(err.Error(), "gzip") {
+		t.Fatalf("expected gzip error, got %v", err)
+	}
+}
+
 // TestBasicAuthAlreadyEncoded tests that pre-encoded basic auth is used as-is
 func TestBasicAuthAlreadyEncoded(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -812,22 +917,6 @@ func TestBasicAuthSeparateUsernamePassword(t *testing.T) {
 }
 
 // TestProxyExclusion tests that excluded hosts bypass the proxy
-func TestProxyExclusion(t *testing.T) {
-	// We can't easily test actual proxy behavior without a proxy server,
-	// but we can test that the config is accepted and client is created
-	config := &ClientConfig{
-		Proxy:        "http://proxy.example.com:8080",
-		ExcludeProxy: []string{"localhost", "internal.company.com"},
-	}
-
-	client, err := NewHttpClient(config)
-	if err != nil {
-		t.Fatalf("NewHttpClient() error = %v", err)
-	}
-	if client == nil {
-		t.Fatal("NewHttpClient() returned nil")
-	}
-}
 
 // TestTimeoutConfig tests that timeout is properly configured
 func TestTimeoutConfig(t *testing.T) {
@@ -861,16 +950,20 @@ func TestInsecureSSLConfig(t *testing.T) {
 
 // TestNoCookieJar tests client without cookie jar
 func TestNoCookieJar(t *testing.T) {
-	config := &ClientConfig{
-		RememberCookies: false,
-	}
+	t.Parallel()
 
+	config := &ClientConfig{RememberCookies: false}
 	client, err := NewHttpClient(config)
 	if err != nil {
 		t.Fatalf("NewHttpClient() error = %v", err)
 	}
 	if client.cookieJar != nil {
-		t.Error("Cookie jar should be nil when RememberCookies is false")
+		t.Fatal("cookie jar should be nil when RememberCookies is false")
+	}
+
+	client.SetCookies("https://example.com", []*http.Cookie{{Name: "ignored", Value: "value"}})
+	if cookies := client.GetCookies("https://example.com"); len(cookies) != 0 {
+		t.Fatalf("expected no cookies when jar disabled, got %v", cookies)
 	}
 }
 

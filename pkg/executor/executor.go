@@ -66,6 +66,10 @@ func (e *Executor) Execute(request *models.HttpRequest) (*Result, error) {
 
 // ExecuteWithContext sends an HTTP request with context support for cancellation and timeouts.
 func (e *Executor) ExecuteWithContext(ctx context.Context, request *models.HttpRequest) (*Result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Wrap(err, "request cancelled before execution")
+	}
+
 	result := &Result{}
 
 	var sessionMgr *session.SessionManager
@@ -150,6 +154,9 @@ func (e *Executor) ExecuteWithContext(ctx context.Context, request *models.HttpR
 	if request.Metadata.PostScript != "" {
 		scriptResult, err := e.executePostScript(ctx, request, resp, sessionMgr)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return result, errors.Wrap(ctxErr, "post-script cancelled")
+			}
 			return result, err
 		}
 		result.Logs = scriptResult.Logs

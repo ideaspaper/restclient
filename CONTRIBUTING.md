@@ -7,6 +7,7 @@ Thank you for your interest in contributing to restclient! This document provide
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
 - [Project Structure](#project-structure)
+- [Extending CLI & Configuration](#extending-cli--configuration)
 - [Code Style Guidelines](#code-style-guidelines)
 - [Testing Guidelines](#testing-guidelines)
 - [Error Handling](#error-handling)
@@ -18,7 +19,6 @@ Thank you for your interest in contributing to restclient! This document provide
 ### Prerequisites
 
 - Go 1.24.4 or later
-- golangci-lint (for linting)
 - Make (for build automation)
 
 ### Development Setup
@@ -78,6 +78,34 @@ restclient/
 - **`pkg/`**: Public, reusable packages. Use for functionality that could be used by external consumers.
 - **`cmd/`**: CLI command definitions using Cobra framework.
 - Each package should have a focused, single responsibility.
+
+## Extending CLI & Configuration
+
+### Adding CLI flags
+
+1. **Declare the flag** in `cmd/send.go` (or the relevant command file) within `init()` or the command builder. Follow existing naming conventions and include a helpful description.
+2. **Thread the value** through the command workflow: update any helper functions (e.g., `buildVariableProcessor`, `sendRequest`) to accept the new option explicitly instead of reaching for globals.
+3. **Update config interactions** if the flag mirrors a config knob. Make sure precedence (CLI flag > config file > default) remains clear.
+4. **Document behavior** in `README.md` (usage examples) and this file if the flag affects contributor workflows.
+5. **Test coverage**: add or expand table-driven tests in `cmd/send_test.go` (or relevant package) to cover happy path plus edge cases (invalid values, conflicting flags).
+
+### Default headers & auth hooks
+
+- Default headers are centralized in `config.Config.DefaultHeaders`. When adding new defaults, make them opt-in via config or flag rather than hard-coding per request.
+- Normalize header names using the helpers in `internal/httputil` to avoid duplicates differing only by case.
+- If a default header introduces authentication behavior (e.g., API keys), ensure it can be disabled per-request via metadata and is covered by tests in `pkg/client` or `pkg/executor`.
+
+### Variable resolvers
+
+1. Add new resolver logic inside `pkg/variables/processor.go`. Keep resolvers isolated (system vars vs. prompts vs. dotenv) and unit-tested via focused table tests (`processor_test.go`).
+2. Fail fast when a resolver cannot satisfy a token (return a descriptive error instead of leaving `{{token}}` intact).
+3. If the resolver requires external input (filesystem, prompts), abstract it behind an interface so tests can supply fakes.
+4. Document the new syntax/behavior in `README.md` and reference examples in `examples/*.http`.
+
+### Cancellation and scripting hooks
+
+- New behaviors that involve cancellation (e.g., long-running preprocessors) must accept `context.Context` and propagate it through to lower layers (`pkg/executor`, `pkg/scripting`).
+- When adding pre/post scripts, ensure both the executor and scripting tests cover interruption, success, and failure flows.
 
 ## Code Style Guidelines
 
@@ -216,6 +244,7 @@ func TestParseRequestLine(t *testing.T) {
 3. **Test isolation**: Use `t.TempDir()` for temporary directories
 4. **Cleanup**: Use `defer` for cleanup operations
 5. **HTTP testing**: Use `httptest.NewServer()` for HTTP client tests
+6. **Cancellation flows**: When introducing contexts or signal handling, add table-driven tests that cover success, timeout, and explicit cancellation.
 
 ### Mock Pattern
 
@@ -372,7 +401,7 @@ func NewHttpRequestParser(content string, defaultHeaders map[string]string, base
 
 ### Before Submitting
 
-1. **Run the linter**: `make lint`
+1. **Format code**: `gofmt -w ./`
 2. **Run all tests**: `make test`
 3. **Format code**: Code is auto-formatted by `gofmt` and `goimports`
 4. **Update documentation** if adding new features
@@ -407,16 +436,15 @@ Before requesting review, ensure:
 - [ ] No linter warnings
 - [ ] Commit history is clean and logical
 
-### Linting Configuration
+## Go Best Practices
 
-The project uses golangci-lint v2 with the following key settings:
-
-- **gocyclo**: Maximum cyclomatic complexity of 25
-- **nakedret**: No naked returns in functions > 30 lines
-- **bodyclose**: HTTP response bodies must be closed
-- **gosec**: Security checks enabled (with some exceptions for CLI tool patterns)
-
-See `.golangci.yml` for the complete configuration.
+- Prefer small, composable packages; keep exported APIs minimal.
+- Keep functions under 40 lines when possible; refactor helpers instead of nesting conditionals.
+- Use context-aware variants (`FooWithContext`) for operations that may block or depend on cancellation.
+- Handle errors explicitly; avoid ignoring returned errors unless there's documented justification.
+- Add table-driven tests for new behaviors, including error cases and boundary conditions.
+- Run `go test ./...` before submitting pull requests.
+- Document exported identifiers with Go-style comments starting with the identifier name.
 
 ## Additional Resources
 

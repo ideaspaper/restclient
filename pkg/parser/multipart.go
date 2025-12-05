@@ -56,11 +56,10 @@ func extractBoundary(contentType string) string {
 	for _, part := range strings.Split(contentType, ";") {
 		part = strings.TrimSpace(part)
 		lowerPart := strings.ToLower(part)
-		if after, found := strings.CutPrefix(lowerPart, "boundary="); found {
+		if _, found := strings.CutPrefix(lowerPart, "boundary="); found {
 			// Use the original case for the boundary value
 			boundary := part[len("boundary="):]
 			boundary = strings.Trim(boundary, `"`)
-			_ = after // boundary value extracted from original case
 			return boundary
 		}
 	}

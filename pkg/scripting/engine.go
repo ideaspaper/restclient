@@ -80,10 +80,15 @@ func (e *Engine) ExecuteWithContext(ctx context.Context, script string, scriptCt
 	e.vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 
 	// Set up interrupt handler for context cancellation
+	interruptDone := make(chan struct{})
 	go func() {
-		<-ctx.Done()
-		e.vm.Interrupt("context canceled")
+		select {
+		case <-ctx.Done():
+			e.vm.Interrupt("context canceled")
+		case <-interruptDone:
+		}
 	}()
+	defer close(interruptDone)
 
 	// Register global objects
 	if err := e.registerGlobals(scriptCtx, result); err != nil {
