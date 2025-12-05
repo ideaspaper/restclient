@@ -160,7 +160,6 @@ func (m InputFormModel) View() string {
 	if m.submitted {
 		// Show summary of entered values as a bulleted list
 		var b strings.Builder
-		b.WriteString("\n")
 		for i, field := range m.fields {
 			value := m.inputs[i].Value()
 			if value == "" {

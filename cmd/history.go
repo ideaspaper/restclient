@@ -243,6 +243,7 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		item = *itemPtr
+		fmt.Println() // Blank line before output
 	}
 
 	request := &models.HttpRequest{

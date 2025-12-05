@@ -265,7 +265,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 			return errors.NewValidationErrorWithValue("request name", requestName, "request not found")
 		}
 		item := RequestItem{Request: request, Index: selectedIndex}
-		fmt.Printf("\n%s\n", item.String())
+		fmt.Printf("\n%s\n\n", item.String())
 	} else if cmd.Flags().Changed("index") {
 		internalIndex := requestIndex - 1
 		if internalIndex < 0 || internalIndex >= len(requests) {
@@ -274,7 +274,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 		request = requests[internalIndex]
 		selectedIndex = internalIndex
 		item := RequestItem{Request: request, Index: selectedIndex}
-		fmt.Printf("\n%s\n", item.String())
+		fmt.Printf("\n%s\n\n", item.String())
 	} else {
 		if len(requests) > 1 {
 			request, err = selectRequest(requests)

@@ -292,8 +292,8 @@ func (f *Formatter) FormatDetails(item models.HistoricalHttpRequest) string {
 
 	if item.Body != "" {
 		sb.WriteString("\nBody:\n")
-		sb.WriteString(item.Body)
-		sb.WriteString("\n")
+		body := strings.TrimSuffix(item.Body, "\n")
+		sb.WriteString(body)
 	}
 
 	return sb.String()
