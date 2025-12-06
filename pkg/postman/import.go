@@ -264,6 +264,7 @@ func writeItems(content *strings.Builder, items []Item, collectionAuth *Auth, op
 }
 
 // writeVariables writes collection variables as .http file variables
+// Secret variables are written with the !secret suffix for user input prompts
 func writeVariables(content *strings.Builder, variables []Variable) {
 	for _, v := range variables {
 		if v.Disabled {
@@ -274,7 +275,15 @@ func writeVariables(content *strings.Builder, variables []Variable) {
 			key = v.ID
 		}
 		value := v.GetValue()
-		content.WriteString(fmt.Sprintf("@%s = %s\n", key, value))
+
+		// Check if this is a secret variable
+		if v.IsSecret() {
+			// Write as a user input prompt with !secret suffix
+			// Format: @varName = {{:varName!secret}}
+			content.WriteString(fmt.Sprintf("@%s = {{:%s!secret}}\n", key, key))
+		} else {
+			content.WriteString(fmt.Sprintf("@%s = %s\n", key, value))
+		}
 	}
 	content.WriteString("\n")
 }

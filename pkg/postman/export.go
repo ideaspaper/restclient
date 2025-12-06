@@ -16,6 +16,9 @@ import (
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
 
+// secretUserInputRegex matches {{:varName!secret}} patterns in variable values
+var secretUserInputRegex = regexp.MustCompile(`\{\{:([a-zA-Z_][a-zA-Z0-9_]*)!secret\}\}`)
+
 // ExportOptions configures how .http files are exported
 type ExportOptions struct {
 	// CollectionName is the name for the Postman collection
@@ -161,11 +164,24 @@ func Export(httpFiles []string, outputPath string, opts ExportOptions) (*ExportR
 	// Add collection variables
 	if opts.IncludeVariables {
 		for k, v := range allVariables {
-			collection.Variable = append(collection.Variable, Variable{
+			variable := Variable{
 				Key:   k,
 				Value: v,
 				Type:  "string",
-			})
+			}
+
+			// Check if this variable value contains a secret user input pattern
+			// e.g., @apiKey = {{:apiKey!secret}}
+			if secretUserInputRegex.MatchString(v) {
+				variable.Type = "secret"
+				// Also add [secret] marker in description for round-trip compatibility
+				variable.Description = &Description{
+					Content: "[secret]",
+					Type:    "text/plain",
+				}
+			}
+
+			collection.Variable = append(collection.Variable, variable)
 			result.VariablesCount++
 		}
 	}
@@ -244,11 +260,22 @@ func ExportToCollection(httpFiles []string, opts ExportOptions) (*Collection, er
 
 	if opts.IncludeVariables {
 		for k, v := range allVariables {
-			collection.Variable = append(collection.Variable, Variable{
+			variable := Variable{
 				Key:   k,
 				Value: v,
 				Type:  "string",
-			})
+			}
+
+			// Check if this variable value contains a secret user input pattern
+			if secretUserInputRegex.MatchString(v) {
+				variable.Type = "secret"
+				variable.Description = &Description{
+					Content: "[secret]",
+					Type:    "text/plain",
+				}
+			}
+
+			collection.Variable = append(collection.Variable, variable)
 		}
 	}
 

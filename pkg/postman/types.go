@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 )
 
 // Collection represents a Postman Collection v2.1.0
@@ -340,11 +341,24 @@ type Variable struct {
 	ID          string       `json:"id,omitempty"`
 	Key         string       `json:"key,omitempty"`
 	Value       any          `json:"value,omitempty"`
-	Type        string       `json:"type,omitempty"` // "string", "boolean", "any", "number"
+	Type        string       `json:"type,omitempty"` // "string", "boolean", "any", "number", "secret"
 	Name        string       `json:"name,omitempty"`
 	Description *Description `json:"description,omitempty"`
 	System      bool         `json:"system,omitempty"`
 	Disabled    bool         `json:"disabled,omitempty"`
+}
+
+// IsSecret returns true if this variable is marked as secret.
+// A variable is considered secret if its Type is "secret" or if the description
+// contains "[secret]" marker (used for round-trip compatibility).
+func (v *Variable) IsSecret() bool {
+	if v.Type == "secret" {
+		return true
+	}
+	if v.Description != nil && strings.Contains(v.Description.Content, "[secret]") {
+		return true
+	}
+	return false
 }
 
 // GetValue returns the variable value as a string

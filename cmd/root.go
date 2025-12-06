@@ -45,7 +45,9 @@ Examples:
 
   # Switch environment
   restclient env use production`,
-	Version: version,
+	Version:       version,
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return initConfig()
 	},

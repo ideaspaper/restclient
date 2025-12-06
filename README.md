@@ -439,6 +439,30 @@ restclient postman import my-api.postman_collection.json -o ./api
 restclient postman export ./My-API/**/*.http -n "My API" -o updated-collection.json
 ```
 
+#### Secret Variable Interoperability
+
+restclient preserves secret variable metadata when importing from and exporting to Postman collections:
+
+**Import:** Postman variables marked as `type: "secret"` or with `[secret]` in their description are converted to the `{{:varName!secret}}` syntax in `.http` files:
+
+```http
+# Postman variable with type: "secret"
+@apiKey = {{:apiKey!secret}}
+```
+
+**Export:** File variables using `{{:varName!secret}}` syntax are exported with `type: "secret"` and `[secret]` in the description, ensuring the secret status is preserved when re-importing:
+
+```http
+# This .http file variable
+@password = {{:password!secret}}
+
+# Becomes a Postman variable with:
+# - type: "secret"
+# - description: "[secret]"
+```
+
+This enables full round-trip compatibility for secret variables between restclient and Postman.
+
 ## HTTP File Format
 
 ### Basic Request

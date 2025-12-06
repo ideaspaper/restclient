@@ -1,74 +1,115 @@
-### Comprehensive Examples
-### This file demonstrates various request patterns including user input,
-### scripting, and common malformed request scenarios with parser warnings.
+### restclient Examples
+### This file demonstrates the features of restclient using JSONPlaceholder API.
+### https://jsonplaceholder.typicode.com
 
 @baseUrl = https://jsonplaceholder.typicode.com
 
 ###############################################################################
-# BASIC REQUESTS (No User Input)
+# BASIC REQUESTS
 ###############################################################################
 
-### Simple GET request - no parameters
-# @name simpleGet
+### Simple GET request
+# @name getPosts
+GET {{baseUrl}}/posts
+Accept: application/json
+
+### GET a single resource
+# @name getPost
 GET {{baseUrl}}/posts/1
 Accept: application/json
 
-### GET with static query parameters
-# @name staticQuery
-GET {{baseUrl}}/posts?userId=1&_limit=5
-Accept: application/json
-
-### POST with static body
-# @name staticPost
+### POST - Create a new resource
+# @name createPost
 POST {{baseUrl}}/posts
 Content-Type: application/json
 
 {
-    "title": "Static Title",
-    "body": "This post has no dynamic content",
+    "title": "My New Post",
+    "body": "This is the content of my post",
     "userId": 1
 }
 
+### PUT - Update a resource
+# @name updatePost
+PUT {{baseUrl}}/posts/1
+Content-Type: application/json
+
+{
+    "id": 1,
+    "title": "Updated Title",
+    "body": "Updated content",
+    "userId": 1
+}
+
+### PATCH - Partial update
+# @name patchPost
+PATCH {{baseUrl}}/posts/1
+Content-Type: application/json
+
+{
+    "title": "Patched Title Only"
+}
+
+### DELETE a resource
+# @name deletePost
+DELETE {{baseUrl}}/posts/1
+
 ###############################################################################
-# USER INPUT IN URL PATH AND QUERY ({{:paramName}})
+# QUERY PARAMETERS
 ###############################################################################
 
-### GET with user input in path
-# @name dynamicPath
+### Multi-line query parameters
+# @name queryPosts
+GET {{baseUrl}}/posts
+    ?userId=1
+    &_limit=5
+    &_page=1
+Accept: application/json
+
+### Nested resources
+# @name getUserPosts
+GET {{baseUrl}}/users/1/posts
+Accept: application/json
+
+### Filtering with query
+# @name filterTodos
+GET {{baseUrl}}/todos?completed=true&userId=1
+Accept: application/json
+
+###############################################################################
+# USER INPUT VARIABLES ({{:paramName}})
+# These prompt you for values interactively
+###############################################################################
+
+### Dynamic path parameter
+# @name getPostById
 # Prompts for: id
 GET {{baseUrl}}/posts/{{:id}}
 Accept: application/json
 
-### GET with user input in query parameters
-# @name dynamicQuery
-# Prompts for: userId, page, limit
+### Dynamic query parameters
+# @name searchPosts
+# Prompts for: userId, limit
 GET {{baseUrl}}/posts
     ?userId={{:userId}}
-    &_page={{:page}}
     &_limit={{:limit}}
 Accept: application/json
 
-### GET with user input in both path and query
-# @name dynamicPathAndQuery
-# Prompts for: userId, completed
-GET {{baseUrl}}/users/{{:userId}}/todos?completed={{:completed}}
-Accept: application/json
-
-### POST with user input in body
-# @name dynamicBody
-# Prompts for: title, body, authorId
+### User input in request body
+# @name createDynamicPost
+# Prompts for: title, content, authorId
 POST {{baseUrl}}/posts
 Content-Type: application/json
 
 {
     "title": "{{:title}}",
-    "body": "{{:body}}",
+    "body": "{{:content}}",
     "userId": {{:authorId}}
 }
 
-### PUT with user input in path and body
-# @name dynamicUpdate
-# Prompts for: postId, newTitle, newBody
+### Shared user input across URL and body
+# @name updateDynamicPost
+# Prompts for: postId (used in URL and body), newTitle, newBody
 PUT {{baseUrl}}/posts/{{:postId}}
 Content-Type: application/json
 
@@ -80,240 +121,285 @@ Content-Type: application/json
 }
 
 ###############################################################################
-# USER INPUT IN SCRIPTS
+# SECRET USER INPUT ({{:paramName!secret}})
+# Values are masked during entry and in CLI output
 ###############################################################################
 
-### Pre-request script with user input
-# @name scriptUserInput
-# Prompts for: searchTerm (used in pre-request script)
-< {%
-// User input is available in scripts via global variables
-var term = "{{:searchTerm}}";
-client.log("Searching for: " + term);
-client.global.set("searchTerm", term);
-%}
-GET {{baseUrl}}/posts
-Accept: application/json
-
-> {%
-client.test("Search completed", function() {
-    client.assert(response.status === 200);
-});
-client.log("Found " + response.body.length + " posts");
-%}
-
-### Dynamic test assertions with user input
-# @name dynamicTest
-# Prompts for: expectedId
-GET {{baseUrl}}/posts/{{:expectedId}}
-Accept: application/json
-
-> {%
-var expectedId = parseInt("{{:expectedId}}");
-client.test("Response has correct ID", function() {
-    client.assert(response.body.id === expectedId, 
-        "Expected ID " + expectedId + " but got " + response.body.id);
-});
-%}
-
-### User input for authentication header
-# @name authWithUserInput
-# Prompts for: apiToken
+### Secret in Authorization header
+# @name authenticatedRequest
+# Prompts for: apiToken (masked input)
 GET {{baseUrl}}/posts/1
 Accept: application/json
-Authorization: Bearer {{:apiToken}}
+Authorization: Bearer {{:apiToken!secret}}
 
-> {%
-client.test("Request was authenticated", function() {
-    client.assert(response.status === 200);
-});
-%}
-
-###############################################################################
-# MALFORMED REQUESTS - URL ISSUES
-###############################################################################
-# These requests demonstrate parser warnings for common URL mistakes
-
-### Unknown HTTP method (typo: DELET instead of DELETE)
-# @name malformedMethod
-# Warning: unknown HTTP method 'DELET', defaulting to GET
-DELET {{baseUrl}}/posts/1
-Accept: application/json
-
-### Another method typo (POSTT instead of POST)
-# @name malformedMethodPost
-# Warning: unknown HTTP method 'POSTT', defaulting to GET
-POSTT {{baseUrl}}/posts
-Content-Type: application/json
-
-{
-    "title": "This won't POST correctly",
-    "body": "Method typo means this becomes GET",
-    "userId": 1
-}
-
-###############################################################################
-# MALFORMED REQUESTS - HEADER ISSUES
-###############################################################################
-
-### Header without colon separator
-# @name malformedHeaderNoColon
-# Warning: malformed header 'Authorization Bearer token' - missing colon
-GET {{baseUrl}}/posts/1
-Authorization Bearer token123
-Accept: application/json
-
-### Multiple malformed headers
-# @name malformedHeadersMultiple
-# Warning: multiple headers missing colons
-GET {{baseUrl}}/posts/1
-Content-Type application/json
-Accept text/plain
-Cache-Control no-cache
-
-###############################################################################
-# MALFORMED REQUESTS - BODY ISSUES
-###############################################################################
-
-### Body referencing non-existent file
-# @name malformedBodyMissingFile
-# Warning: file reference could not be read
+### Login with secret password
+# @name loginExample
+# Prompts for: username, password (password is masked)
 POST {{baseUrl}}/posts
 Content-Type: application/json
 
-< ./data/nonexistent-payload.json
+{
+    "username": "{{:username}}",
+    "password": "{{:password!secret}}",
+    "action": "login"
+}
 
-### Multiple file references with one missing
-# @name malformedBodyPartialFile
-# Warning: one file reference fails, others may succeed
+### Multiple secrets
+# @name multiSecretExample
+# Prompts for: apiKey (masked), secretToken (masked), userId
+GET {{baseUrl}}/users/{{:userId}}
+Accept: application/json
+X-API-Key: {{:apiKey!secret}}
+X-Secret-Token: {{:secretToken!secret}}
+
+###############################################################################
+# SYSTEM VARIABLES
+###############################################################################
+
+### UUID and timestamps
+# @name systemVariables
 POST {{baseUrl}}/posts
 Content-Type: application/json
 
-< ./missing-file.json
-
-###############################################################################
-# MALFORMED REQUESTS - SCRIPT ISSUES
-###############################################################################
-
-### Script with syntax error (unclosed brace)
-# @name malformedScriptSyntax
-GET {{baseUrl}}/posts/1
-Accept: application/json
-
-> {%
-client.test("This has a syntax error", function() {
-    client.assert(response.status === 200);
-// Missing closing brace - this will cause runtime error
-%}
-
-### Script with undefined variable reference
-# @name malformedScriptUndefined
-GET {{baseUrl}}/posts/1
-Accept: application/json
-
-> {%
-client.test("Undefined variable", function() {
-    // undefinedVar is never declared
-    client.assert(undefinedVar === true);
-});
-%}
-
-### Pre-request script error
-# @name malformedPreScript
-< {%
-// This will throw an error
-throw new Error("Intentional pre-script error");
-%}
-GET {{baseUrl}}/posts/1
-Accept: application/json
-
-###############################################################################
-# COMBINED MALFORMED - MULTIPLE ISSUES
-###############################################################################
-
-### Multiple issues in one request
-# @name malformedCombined
-# Warning: unknown method, malformed headers, missing file
-DELET {{baseUrl}}/posts/1
-Authorization Bearer token
-Content-Type application/json
-
-< ./nonexistent.json
-
-### Method typo with script error
-# @name malformedMethodAndScript
-POSTT {{baseUrl}}/posts
-Content-Type: application/json
-
 {
-    "title": "Test",
-    "body": "Test body",
-    "userId": 1
+    "id": "{{$guid}}",
+    "timestamp": {{$timestamp}},
+    "createdAt": "{{$datetime iso8601}}",
+    "expiresAt": "{{$datetime iso8601 1 h}}",
+    "localTime": "{{$localDatetime YYYY-MM-DD HH:mm:ss}}"
 }
 
-> {%
-// Syntax error in post-response script
-client.test("Will fail", function() {
-    client.assert(response.status === 201)  // missing semicolon is ok
-    // but this unclosed function is not
-%}
-
-###############################################################################
-# VALID REQUESTS FOR COMPARISON
-###############################################################################
-
-### Valid DELETE request (correct spelling)
-# @name validDelete
-DELETE {{baseUrl}}/posts/1
-
-### Valid POST with all correct syntax
-# @name validPost
+### Random values
+# @name randomValues
 POST {{baseUrl}}/posts
 Content-Type: application/json
-Accept: application/json
-Cache-Control: no-cache
 
 {
-    "title": "Valid Post",
-    "body": "All syntax is correct",
-    "userId": 1
+    "code": {{$randomInt 1000 9999}},
+    "title": "Random Post {{$randomInt 1 100}}",
+    "body": "Generated content",
+    "userId": {{$randomInt 1 10}}
 }
 
-> {%
-client.test("Status is 201", function() {
-    client.assert(response.status === 201, "Expected 201 Created");
-});
-client.log("Post created with ID: " + response.body.id);
-%}
+###############################################################################
+# JAVASCRIPT SCRIPTING
+###############################################################################
 
-### Valid request with all features
-# @name validComplete
-# Prompts for: postId
+### Pre-request script
+# @name preRequestScript
 < {%
-client.log("Fetching post...");
-var startTime = Date.now();
-client.global.set("startTime", startTime);
+client.log("Preparing request...");
+client.global.set("requestTime", $timestamp());
+client.global.set("requestId", $uuid());
 %}
-GET {{baseUrl}}/posts/{{:postId}}
+GET {{baseUrl}}/posts/1
 Accept: application/json
-Cache-Control: no-cache
+X-Request-Id: {{requestId}}
+
+### Post-response script with tests
+# @name postResponseTests
+GET {{baseUrl}}/posts/1
+Accept: application/json
 
 > {%
-var endTime = Date.now();
-var startTime = client.global.get("startTime");
-var duration = endTime - startTime;
-
 client.test("Status is 200", function() {
-    client.assert(response.status === 200);
+    client.assert(response.status === 200, "Expected status 200");
 });
 
-client.test("Has valid post structure", function() {
-    client.assert(response.body.id !== undefined);
-    client.assert(response.body.title !== undefined);
-    client.assert(response.body.body !== undefined);
-    client.assert(response.body.userId !== undefined);
+client.test("Response has required fields", function() {
+    client.assert(response.body.id !== undefined, "Missing id");
+    client.assert(response.body.title !== undefined, "Missing title");
+    client.assert(response.body.body !== undefined, "Missing body");
+    client.assert(response.body.userId !== undefined, "Missing userId");
 });
 
-client.log("Request completed in " + duration + "ms");
+client.test("Content-Type is JSON", function() {
+    var contentType = response.headers.valueOf("Content-Type");
+    client.assert(contentType.includes("application/json"), "Expected JSON");
+});
+
 client.log("Post title: " + response.body.title);
 %}
+
+### Chaining requests with global variables
+# @name chainStep1_GetUser
+# First, get a user and store their ID
+GET {{baseUrl}}/users/1
+Accept: application/json
+
+> {%
+client.test("Got user successfully", function() {
+    client.assert(response.status === 200);
+});
+
+// Store user info for the next request
+client.global.set("userId", response.body.id);
+client.global.set("userName", response.body.name);
+client.log("Stored user: " + response.body.name);
+%}
+
+###
+
+### Use stored values from previous request
+# @name chainStep2_GetUserPosts
+# Uses userId stored from chainStep1_GetUser
+GET {{baseUrl}}/users/{{userId}}/posts
+Accept: application/json
+
+> {%
+client.test("Got user posts", function() {
+    client.assert(response.status === 200);
+    client.assert(Array.isArray(response.body), "Expected array of posts");
+});
+
+var userName = client.global.get("userName");
+client.log("Found " + response.body.length + " posts by " + userName);
+%}
+
+### Script utility functions
+# @name scriptUtilities
+POST {{baseUrl}}/posts
+Content-Type: application/json
+
+{
+    "title": "Test Post",
+    "body": "Testing utilities",
+    "userId": 1
+}
+
+> {%
+// Demonstrate built-in utility functions
+var uuid = $uuid();
+var timestamp = $timestamp();
+var isoTime = $isoTimestamp();
+var randomNum = $randomInt(1, 100);
+var randomStr = $randomString(16);
+var encoded = $base64("Hello, World!");
+var decoded = $base64Decode(encoded);
+var hash = $sha256(JSON.stringify(response.body));
+
+client.log("UUID: " + uuid);
+client.log("Timestamp: " + timestamp);
+client.log("ISO Time: " + isoTime);
+client.log("Random Number: " + randomNum);
+client.log("Random String: " + randomStr);
+client.log("Base64: " + encoded + " -> " + decoded);
+client.log("Response Hash: " + hash);
+
+// Store for potential use
+client.global.set("lastResponseHash", hash);
+%}
+
+###############################################################################
+# FORM DATA
+###############################################################################
+
+### URL-encoded form data
+# @name formUrlEncoded
+POST {{baseUrl}}/posts
+Content-Type: application/x-www-form-urlencoded
+
+title=Form Post
+&body=Created from form data
+&userId=1
+
+### URL-encoded with user input
+# @name formWithUserInput
+# Prompts for: formTitle, formBody
+POST {{baseUrl}}/posts
+Content-Type: application/x-www-form-urlencoded
+
+title={{:formTitle}}
+&body={{:formBody}}
+&userId=1
+
+###############################################################################
+# REQUEST VARIABLES (Response Chaining)
+###############################################################################
+
+### Create a post and capture the response
+# @name createForChain
+POST {{baseUrl}}/posts
+Content-Type: application/json
+
+{
+    "title": "Chained Post",
+    "body": "This post will be referenced",
+    "userId": 1
+}
+
+###
+
+### Reference the previous response using request variables
+# @name useCreatedPost
+# Uses the ID from createForChain response
+GET {{baseUrl}}/posts/{{createForChain.response.body.$.id}}
+Accept: application/json
+
+###############################################################################
+# COMPLETE WORKFLOW EXAMPLE
+###############################################################################
+
+### Full workflow with pre/post scripts and user input
+# @name completeWorkflow
+# Prompts for: searchUserId
+< {%
+// Pre-request: Set up timing and logging
+var startTime = $timestamp();
+client.global.set("workflowStart", startTime);
+client.log("Starting workflow at " + $isoTimestamp());
+client.log("Searching for user ID: {{:searchUserId}}");
+%}
+GET {{baseUrl}}/users/{{:searchUserId}}/todos
+Accept: application/json
+
+> {%
+// Post-response: Validate and analyze
+var endTime = $timestamp();
+var startTime = client.global.get("workflowStart");
+var duration = endTime - startTime;
+
+client.test("Request successful", function() {
+    client.assert(response.status === 200, "Expected 200 OK");
+});
+
+client.test("Response is array", function() {
+    client.assert(Array.isArray(response.body), "Expected array");
+});
+
+// Analyze the todos
+var todos = response.body;
+var completed = todos.filter(function(t) { return t.completed; }).length;
+var pending = todos.length - completed;
+
+client.log("=== Workflow Results ===");
+client.log("Duration: " + duration + "ms");
+client.log("Total todos: " + todos.length);
+client.log("Completed: " + completed);
+client.log("Pending: " + pending);
+
+// Store results
+client.global.set("lastTodoCount", todos.length);
+client.global.set("lastCompletedCount", completed);
+%}
+
+###############################################################################
+# TIPS AND NOTES
+###############################################################################
+
+# Running examples:
+#   restclient send examples/jsonplaceholder.http                    # Interactive selection
+#   restclient send examples/jsonplaceholder.http -n getPosts        # By name
+#   restclient send examples/jsonplaceholder.http -i 1               # By index
+#   restclient send examples/jsonplaceholder.http --use-cached       # Reuse cached inputs
+#   restclient send examples/jsonplaceholder.http --dry-run          # Preview without sending
+#
+# Session management:
+#   restclient session show                                          # View current session
+#   restclient session clear                                         # Clear session data
+#   restclient send examples/jsonplaceholder.http --no-session       # Disable session
+#   restclient send examples/jsonplaceholder.http --session my-test  # Named session
+#
+# History:
+#   restclient history show                                          # View history
+#   restclient history replay                                        # Replay a request

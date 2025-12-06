@@ -1203,3 +1203,175 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("Expected schema '%s', got '%s'", SchemaV21, collection.Info.Schema)
 	}
 }
+
+func TestExportSecretVariables(t *testing.T) {
+	// Test that variables with {{:name!secret}} pattern are exported as secret type
+	tmpDir, err := os.MkdirTemp("", "postman-export-secrets-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create .http file with secret variables
+	httpContent := `@baseUrl = https://api.example.com
+@apiKey = {{:apiKey!secret}}
+@password = {{:password!secret}}
+@normalVar = someValue
+
+# @name AuthRequest
+POST {{baseUrl}}/auth
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+{
+    "password": "{{password}}"
+}
+`
+
+	httpPath := filepath.Join(tmpDir, "secrets.http")
+	if err := os.WriteFile(httpPath, []byte(httpContent), 0644); err != nil {
+		t.Fatalf("Failed to write .http file: %v", err)
+	}
+
+	outputPath := filepath.Join(tmpDir, "collection.json")
+	opts := DefaultExportOptions()
+	opts.IncludeVariables = true
+
+	result, err := Export([]string{httpPath}, outputPath, opts)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	if result.VariablesCount != 4 {
+		t.Errorf("Expected 4 variables, got %d", result.VariablesCount)
+	}
+
+	// Parse the exported collection
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+
+	var collection Collection
+	if err := json.Unmarshal(data, &collection); err != nil {
+		t.Fatalf("Failed to parse exported collection: %v", err)
+	}
+
+	// Create a map for easier verification
+	varMap := make(map[string]Variable)
+	for _, v := range collection.Variable {
+		varMap[v.Key] = v
+	}
+
+	// Check regular variable
+	if baseUrl, ok := varMap["baseUrl"]; ok {
+		if baseUrl.Type == "secret" {
+			t.Error("baseUrl should not be secret")
+		}
+	} else {
+		t.Error("baseUrl variable not found")
+	}
+
+	// Check normalVar
+	if normalVar, ok := varMap["normalVar"]; ok {
+		if normalVar.Type == "secret" {
+			t.Error("normalVar should not be secret")
+		}
+	} else {
+		t.Error("normalVar variable not found")
+	}
+
+	// Check apiKey is marked as secret
+	if apiKey, ok := varMap["apiKey"]; ok {
+		if apiKey.Type != "secret" {
+			t.Errorf("apiKey should be type 'secret', got '%s'", apiKey.Type)
+		}
+		// Also check [secret] marker in description for round-trip compatibility
+		if apiKey.Description == nil || apiKey.Description.Content != "[secret]" {
+			t.Error("apiKey should have [secret] in description for round-trip compatibility")
+		}
+	} else {
+		t.Error("apiKey variable not found")
+	}
+
+	// Check password is marked as secret
+	if password, ok := varMap["password"]; ok {
+		if password.Type != "secret" {
+			t.Errorf("password should be type 'secret', got '%s'", password.Type)
+		}
+		if password.Description == nil || password.Description.Content != "[secret]" {
+			t.Error("password should have [secret] in description for round-trip compatibility")
+		}
+	} else {
+		t.Error("password variable not found")
+	}
+}
+
+func TestSecretVariablesRoundTrip(t *testing.T) {
+	// Test full round-trip: .http with secrets -> Postman -> .http with secrets
+	tmpDir, err := os.MkdirTemp("", "postman-secrets-roundtrip-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create original .http file with secret variables
+	originalHttp := `@baseUrl = https://api.example.com
+@apiKey = {{:apiKey!secret}}
+@normalVar = test123
+
+# @name GetData
+GET {{baseUrl}}/data
+Authorization: Bearer {{apiKey}}
+`
+
+	httpPath := filepath.Join(tmpDir, "original.http")
+	if err := os.WriteFile(httpPath, []byte(originalHttp), 0644); err != nil {
+		t.Fatalf("Failed to write .http file: %v", err)
+	}
+
+	// Export to Postman
+	exportPath := filepath.Join(tmpDir, "collection.json")
+	exportOpts := DefaultExportOptions()
+	exportOpts.IncludeVariables = true
+
+	_, err = Export([]string{httpPath}, exportPath, exportOpts)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	// Import back from Postman
+	reimportPath := filepath.Join(tmpDir, "reimported.http")
+	importOpts := DefaultImportOptions()
+	importOpts.OutputFile = reimportPath
+	importOpts.SingleFile = true
+	importOpts.IncludeVariables = true
+
+	_, err = Import(exportPath, importOpts)
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	// Read the reimported file
+	content, err := os.ReadFile(reimportPath)
+	if err != nil {
+		t.Fatalf("Failed to read reimported file: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Verify secret variable preserved with !secret suffix
+	if !contains(contentStr, "@apiKey = {{:apiKey!secret}}") {
+		t.Errorf("Secret variable apiKey should preserve !secret syntax after round-trip, got:\n%s", contentStr)
+	}
+
+	// Verify regular variable remains plain
+	if !contains(contentStr, "@normalVar = test123") {
+		t.Errorf("Regular variable normalVar should remain plain after round-trip, got:\n%s", contentStr)
+	}
+
+	// Verify baseUrl remains plain
+	if !contains(contentStr, "@baseUrl = https://api.example.com") {
+		t.Errorf("Regular variable baseUrl should remain plain after round-trip, got:\n%s", contentStr)
+	}
+}

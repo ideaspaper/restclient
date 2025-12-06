@@ -1950,3 +1950,137 @@ func TestImportDuplicateNamesMultiFile(t *testing.T) {
 		}
 	}
 }
+
+func TestImportSecretVariables(t *testing.T) {
+	// Test that secret variables from Postman are imported with !secret suffix
+	tmpDir, err := os.MkdirTemp("", "postman-import-secrets-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a Postman collection with secret variables
+	collectionWithSecrets := `{
+		"info": {
+			"name": "Secret Variables Test",
+			"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+		},
+		"item": [
+			{
+				"name": "Auth Request",
+				"request": {
+					"method": "POST",
+					"url": "{{baseUrl}}/auth",
+					"header": [
+						{"key": "Authorization", "value": "Bearer {{apiKey}}"}
+					]
+				}
+			}
+		],
+		"variable": [
+			{
+				"key": "baseUrl",
+				"value": "https://api.example.com",
+				"type": "string"
+			},
+			{
+				"key": "apiKey",
+				"value": "secret-api-key-123",
+				"type": "secret"
+			},
+			{
+				"key": "password",
+				"value": "my-password",
+				"type": "string",
+				"description": "[secret] This is a password"
+			}
+		]
+	}`
+
+	collectionPath := filepath.Join(tmpDir, "collection.json")
+	if err := os.WriteFile(collectionPath, []byte(collectionWithSecrets), 0644); err != nil {
+		t.Fatalf("Failed to write collection: %v", err)
+	}
+
+	opts := DefaultImportOptions()
+	opts.OutputDir = tmpDir
+	opts.SingleFile = true
+
+	result, err := Import(collectionPath, opts)
+	if err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	if len(result.FilesCreated) != 1 {
+		t.Fatalf("Expected 1 file, got %d", len(result.FilesCreated))
+	}
+
+	content, err := os.ReadFile(result.FilesCreated[0])
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Regular variable should be plain
+	if !strings.Contains(contentStr, "@baseUrl = https://api.example.com") {
+		t.Error("Regular variable baseUrl should be plain")
+	}
+
+	// Secret variable (type=secret) should use !secret suffix
+	if !strings.Contains(contentStr, "@apiKey = {{:apiKey!secret}}") {
+		t.Errorf("Secret variable apiKey should use !secret syntax, got content:\n%s", contentStr)
+	}
+
+	// Variable with [secret] in description should also use !secret suffix
+	if !strings.Contains(contentStr, "@password = {{:password!secret}}") {
+		t.Errorf("Variable with [secret] in description should use !secret syntax, got content:\n%s", contentStr)
+	}
+}
+
+func TestVariableIsSecret(t *testing.T) {
+	tests := []struct {
+		name     string
+		variable Variable
+		expected bool
+	}{
+		{
+			name:     "type=secret",
+			variable: Variable{Key: "apiKey", Type: "secret"},
+			expected: true,
+		},
+		{
+			name:     "type=string",
+			variable: Variable{Key: "baseUrl", Type: "string"},
+			expected: false,
+		},
+		{
+			name:     "description contains [secret]",
+			variable: Variable{Key: "password", Type: "string", Description: &Description{Content: "[secret] Password"}},
+			expected: true,
+		},
+		{
+			name:     "description without [secret]",
+			variable: Variable{Key: "user", Type: "string", Description: &Description{Content: "Username"}},
+			expected: false,
+		},
+		{
+			name:     "nil description",
+			variable: Variable{Key: "data", Type: "any"},
+			expected: false,
+		},
+		{
+			name:     "empty type and no description",
+			variable: Variable{Key: "empty"},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.variable.IsSecret(); got != tt.expected {
+				t.Errorf("IsSecret() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
