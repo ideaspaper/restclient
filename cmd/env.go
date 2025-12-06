@@ -9,6 +9,7 @@ import (
 
 	"github.com/ideaspaper/restclient/pkg/config"
 	"github.com/ideaspaper/restclient/pkg/errors"
+	"github.com/ideaspaper/restclient/pkg/secrets"
 )
 
 // envCmd represents the env command
@@ -19,6 +20,9 @@ var envCmd = &cobra.Command{
 
 Environments allow you to define variables that can be used in your requests.
 Variables are referenced using {{variableName}} syntax.
+
+Environment variables are stored in a separate secrets file (~/.restclient/secrets.json)
+that should NOT be committed to version control.
 
 Examples:
   # List all environments
@@ -124,7 +128,12 @@ func runEnvList(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to load config")
 	}
 
-	envs := cfg.ListEnvironments()
+	store, err := secrets.Load()
+	if err != nil {
+		return errors.Wrap(err, "failed to load secrets")
+	}
+
+	envs := store.ListEnvironments()
 
 	printHeader("Available Environments:")
 	fmt.Println()
@@ -144,7 +153,7 @@ func runEnvList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show $shared info
-	if shared, ok := cfg.EnvironmentVariables["$shared"]; ok && len(shared) > 0 {
+	if shared, ok := store.GetVariables("$shared"); ok && len(shared) > 0 {
 		fmt.Println()
 		fmt.Printf("  $shared: %d variables (available in all environments)\n", len(shared))
 	}
@@ -177,10 +186,17 @@ func runEnvUse(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to load config")
 	}
 
-	if err := cfg.SetEnvironment(envName); err != nil {
-		return err
+	store, err := secrets.Load()
+	if err != nil {
+		return errors.Wrap(err, "failed to load secrets")
 	}
 
+	// Validate that the environment exists in secrets
+	if !store.HasEnvironment(envName) && envName != "$shared" {
+		return errors.NewValidationErrorWithValue("environment", envName, "not found")
+	}
+
+	cfg.CurrentEnvironment = envName
 	if err := cfg.Save(); err != nil {
 		return errors.Wrap(err, "failed to save config")
 	}
@@ -195,6 +211,11 @@ func runEnvShow(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to load config")
 	}
 
+	store, err := secrets.Load()
+	if err != nil {
+		return errors.Wrap(err, "failed to load secrets")
+	}
+
 	envName := cfg.CurrentEnvironment
 	if len(args) > 0 {
 		envName = args[0]
@@ -205,14 +226,14 @@ func runEnvShow(cmd *cobra.Command, args []string) error {
 		envName = "$shared"
 	}
 
-	vars, ok := cfg.EnvironmentVariables[envName]
+	vars, ok := store.GetVariables(envName)
 	if !ok && envName != "$shared" {
 		return errors.NewValidationErrorWithValue("environment", envName, "environment not found")
 	}
 
 	// Show $shared first if showing a specific environment
 	if envName != "$shared" {
-		if shared, ok := cfg.EnvironmentVariables["$shared"]; ok && len(shared) > 0 {
+		if shared, ok := store.GetVariables("$shared"); ok && len(shared) > 0 {
 			printHeader("$shared variables:")
 			printVariables(shared)
 			fmt.Println()
@@ -234,17 +255,17 @@ func runEnvSet(cmd *cobra.Command, args []string) error {
 	varName := args[1]
 	varValue := args[2]
 
-	cfg, err := config.LoadOrCreateConfig()
+	store, err := secrets.Load()
 	if err != nil {
-		return errors.Wrap(err, "failed to load config")
+		return errors.Wrap(err, "failed to load secrets")
 	}
 
-	if err := cfg.SetEnvironmentVariable(envName, varName, varValue); err != nil {
+	if err := store.SetVariable(envName, varName, varValue); err != nil {
 		return err
 	}
 
-	if err := cfg.Save(); err != nil {
-		return errors.Wrap(err, "failed to save config")
+	if err := store.Save(); err != nil {
+		return errors.Wrap(err, "failed to save secrets")
 	}
 
 	fmt.Printf("Set %s=%s in environment '%s'\n", varName, maskValue(varValue), envName)
@@ -255,24 +276,17 @@ func runEnvUnset(cmd *cobra.Command, args []string) error {
 	envName := args[0]
 	varName := args[1]
 
-	cfg, err := config.LoadOrCreateConfig()
+	store, err := secrets.Load()
 	if err != nil {
-		return errors.Wrap(err, "failed to load config")
+		return errors.Wrap(err, "failed to load secrets")
 	}
 
-	vars, ok := cfg.EnvironmentVariables[envName]
-	if !ok {
-		return errors.NewValidationErrorWithValue("environment", envName, "environment not found")
+	if err := store.UnsetVariable(envName, varName); err != nil {
+		return err
 	}
 
-	if _, exists := vars[varName]; !exists {
-		return errors.NewValidationError("variable", fmt.Sprintf("variable '%s' not found in environment '%s'", varName, envName))
-	}
-
-	delete(vars, varName)
-
-	if err := cfg.Save(); err != nil {
-		return errors.Wrap(err, "failed to save config")
+	if err := store.Save(); err != nil {
+		return errors.Wrap(err, "failed to save secrets")
 	}
 
 	fmt.Printf("Removed %s from environment '%s'\n", varName, envName)
@@ -282,21 +296,21 @@ func runEnvUnset(cmd *cobra.Command, args []string) error {
 func runEnvCreate(cmd *cobra.Command, args []string) error {
 	envName := args[0]
 
-	cfg, err := config.LoadOrCreateConfig()
+	store, err := secrets.Load()
 	if err != nil {
-		return errors.Wrap(err, "failed to load config")
+		return errors.Wrap(err, "failed to load secrets")
 	}
 
-	if _, exists := cfg.EnvironmentVariables[envName]; exists {
+	if store.HasEnvironment(envName) {
 		return errors.NewValidationErrorWithValue("environment", envName, "environment already exists")
 	}
 
-	if err := cfg.AddEnvironment(envName, nil); err != nil {
+	if err := store.AddEnvironment(envName, nil); err != nil {
 		return err
 	}
 
-	if err := cfg.Save(); err != nil {
-		return errors.Wrap(err, "failed to save config")
+	if err := store.Save(); err != nil {
+		return errors.Wrap(err, "failed to save secrets")
 	}
 
 	fmt.Printf("Created environment: %s\n", envName)
@@ -313,12 +327,25 @@ func runEnvDelete(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to load config")
 	}
 
-	if err := cfg.RemoveEnvironment(envName); err != nil {
+	store, err := secrets.Load()
+	if err != nil {
+		return errors.Wrap(err, "failed to load secrets")
+	}
+
+	if err := store.RemoveEnvironment(envName); err != nil {
 		return err
 	}
 
-	if err := cfg.Save(); err != nil {
-		return errors.Wrap(err, "failed to save config")
+	if err := store.Save(); err != nil {
+		return errors.Wrap(err, "failed to save secrets")
+	}
+
+	// Clear current environment if it was the deleted one
+	if cfg.CurrentEnvironment == envName {
+		cfg.CurrentEnvironment = ""
+		if err := cfg.Save(); err != nil {
+			return errors.Wrap(err, "failed to save config")
+		}
 	}
 
 	fmt.Printf("Deleted environment: %s\n", envName)

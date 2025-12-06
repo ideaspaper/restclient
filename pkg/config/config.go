@@ -24,7 +24,9 @@ const (
 	configFileType = "json"
 )
 
-// Config represents the application configuration
+// Config represents the application configuration.
+// Note: Environment variables are stored separately in secrets.json for security.
+// This config file is safe to commit to version control.
 type Config struct {
 	// HTTP client settings
 	FollowRedirects bool `json:"followRedirect" mapstructure:"followRedirect"`
@@ -34,10 +36,7 @@ type Config struct {
 	// Default headers
 	DefaultHeaders map[string]string `json:"defaultHeaders" mapstructure:"defaultHeaders"`
 
-	// Environment variables
-	EnvironmentVariables map[string]map[string]string `json:"environmentVariables" mapstructure:"environmentVariables"`
-
-	// Current environment
+	// Current environment (the selected environment name, actual values are in secrets.json)
 	CurrentEnvironment string `json:"currentEnvironment" mapstructure:"currentEnvironment"`
 
 	// SSL settings
@@ -77,9 +76,6 @@ func DefaultConfig() *Config {
 		DefaultHeaders: map[string]string{
 			constants.HeaderUserAgent: constants.DefaultUserAgent,
 		},
-		EnvironmentVariables: map[string]map[string]string{
-			"$shared": {},
-		},
 		CurrentEnvironment: "",
 		InsecureSSL:        false,
 		ProxyStrictSSL:     true,
@@ -97,7 +93,6 @@ func SetViperDefaults(v *viper.Viper) {
 	v.SetDefault("timeoutInMilliseconds", defaults.TimeoutMs)
 	v.SetDefault("rememberCookiesForSubsequentRequests", defaults.RememberCookies)
 	v.SetDefault("defaultHeaders", defaults.DefaultHeaders)
-	v.SetDefault("environmentVariables", defaults.EnvironmentVariables)
 	v.SetDefault("currentEnvironment", defaults.CurrentEnvironment)
 	v.SetDefault("insecureSSL", defaults.InsecureSSL)
 	v.SetDefault("proxyStrictSSL", defaults.ProxyStrictSSL)
@@ -165,9 +160,6 @@ func LoadConfigFromDir(dir string) (*Config, error) {
 	if cfg.DefaultHeaders == nil {
 		cfg.DefaultHeaders = make(map[string]string)
 	}
-	if cfg.EnvironmentVariables == nil {
-		cfg.EnvironmentVariables = make(map[string]map[string]string)
-	}
 	if cfg.Certificates == nil {
 		cfg.Certificates = make(map[string]CertificateConfig)
 	}
@@ -211,9 +203,6 @@ func LoadConfigFromFile(filePath string) (*Config, error) {
 	if cfg.DefaultHeaders == nil {
 		cfg.DefaultHeaders = make(map[string]string)
 	}
-	if cfg.EnvironmentVariables == nil {
-		cfg.EnvironmentVariables = make(map[string]map[string]string)
-	}
 	if cfg.Certificates == nil {
 		cfg.Certificates = make(map[string]CertificateConfig)
 	}
@@ -246,7 +235,6 @@ func (c *Config) Save() error {
 	c.v.Set("timeoutInMilliseconds", c.TimeoutMs)
 	c.v.Set("rememberCookiesForSubsequentRequests", c.RememberCookies)
 	c.v.Set("defaultHeaders", c.DefaultHeaders)
-	c.v.Set("environmentVariables", c.EnvironmentVariables)
 	c.v.Set("currentEnvironment", c.CurrentEnvironment)
 	c.v.Set("insecureSSL", c.InsecureSSL)
 	c.v.Set("proxyStrictSSL", c.ProxyStrictSSL)
@@ -257,92 +245,6 @@ func (c *Config) Save() error {
 	c.v.Set("showColors", c.ShowColors)
 
 	return c.v.WriteConfigAs(c.configPath)
-}
-
-// GetEnvironment returns the environment variables for the current environment
-func (c *Config) GetEnvironment() map[string]string {
-	result := make(map[string]string)
-
-	// Copy shared environment first
-	if shared, ok := c.EnvironmentVariables["$shared"]; ok {
-		maps.Copy(result, shared)
-	}
-
-	// Overlay current environment
-	if c.CurrentEnvironment != "" {
-		if env, ok := c.EnvironmentVariables[c.CurrentEnvironment]; ok {
-			maps.Copy(result, env)
-		}
-	}
-
-	return result
-}
-
-// SetEnvironment sets the current environment
-func (c *Config) SetEnvironment(name string) error {
-	if name != "" {
-		if _, ok := c.EnvironmentVariables[name]; !ok && name != "$shared" {
-			return errors.NewValidationErrorWithValue("environment", name, "not found")
-		}
-	}
-	c.CurrentEnvironment = name
-	return nil
-}
-
-// ListEnvironments returns a list of available environments
-func (c *Config) ListEnvironments() []string {
-	var envs []string
-	for name := range c.EnvironmentVariables {
-		if name != "$shared" {
-			envs = append(envs, name)
-		}
-	}
-	return envs
-}
-
-// AddEnvironment adds a new environment
-func (c *Config) AddEnvironment(name string, vars map[string]string) error {
-	if name == "$shared" {
-		return errors.NewValidationErrorWithValue("environment", "$shared", "cannot use reserved name")
-	}
-	if vars == nil {
-		vars = make(map[string]string)
-	}
-	c.EnvironmentVariables[name] = vars
-	return nil
-}
-
-// RemoveEnvironment removes an environment
-func (c *Config) RemoveEnvironment(name string) error {
-	if name == "$shared" {
-		return errors.NewValidationErrorWithValue("environment", "$shared", "cannot remove shared environment")
-	}
-	if _, ok := c.EnvironmentVariables[name]; !ok {
-		return errors.NewValidationErrorWithValue("environment", name, "not found")
-	}
-	delete(c.EnvironmentVariables, name)
-	if c.CurrentEnvironment == name {
-		c.CurrentEnvironment = ""
-	}
-	return nil
-}
-
-// SetEnvironmentVariable sets a variable in an environment
-func (c *Config) SetEnvironmentVariable(env, name, value string) error {
-	if _, ok := c.EnvironmentVariables[env]; !ok {
-		return errors.NewValidationErrorWithValue("environment", env, "not found")
-	}
-	c.EnvironmentVariables[env][name] = value
-	return nil
-}
-
-// GetEnvironmentVariable gets a variable from an environment
-func (c *Config) GetEnvironmentVariable(env, name string) (string, bool) {
-	if envVars, ok := c.EnvironmentVariables[env]; ok {
-		val, exists := envVars[name]
-		return val, exists
-	}
-	return "", false
 }
 
 // ToClientConfig converts Config to client.ClientConfig

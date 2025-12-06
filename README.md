@@ -1178,7 +1178,16 @@ Authorization: AWS accessKeyId secretAccessKey token:sessionToken region:us-west
 
 ## Configuration
 
-Configuration is stored in `~/.restclient/config.json`:
+restclient uses two separate files for configuration:
+
+- **`~/.restclient/config.json`** - General settings (safe to commit to version control)
+- **`~/.restclient/secrets.json`** - Environment variables and secrets (should be gitignored)
+
+This separation allows you to share configuration settings while keeping sensitive data local.
+
+### config.json
+
+General settings are stored in `~/.restclient/config.json`:
 
 ```json
 {
@@ -1187,17 +1196,6 @@ Configuration is stored in `~/.restclient/config.json`:
   "rememberCookiesForSubsequentRequests": true,
   "defaultHeaders": {
     "User-Agent": "restclient-cli"
-  },
-  "environmentVariables": {
-    "$shared": {
-      "API_KEY": "shared-key"
-    },
-    "development": {
-      "API_URL": "https://dev.api.example.com"
-    },
-    "production": {
-      "API_URL": "https://api.example.com"
-    }
   },
   "currentEnvironment": "development",
   "insecureSSL": false,
@@ -1208,6 +1206,33 @@ Configuration is stored in `~/.restclient/config.json`:
   "showColors": true
 }
 ```
+
+### secrets.json
+
+Environment variables are stored separately in `~/.restclient/secrets.json`:
+
+```json
+{
+  "environmentVariables": {
+    "$shared": {
+      "API_KEY": "shared-key-for-all-environments"
+    },
+    "development": {
+      "API_URL": "https://dev.api.example.com",
+      "DEBUG": "true"
+    },
+    "production": {
+      "API_URL": "https://api.example.com"
+    }
+  }
+}
+```
+
+The `$shared` environment contains variables that are available in all environments. Environment-specific variables override shared variables with the same name.
+
+**Security:**
+- The secrets file is created with restrictive permissions (`0600` - owner read/write only)
+- Add `secrets.json` to your `.gitignore` to prevent accidentally committing secrets
 
 ### Configuration Options
 

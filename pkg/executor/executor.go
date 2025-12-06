@@ -15,6 +15,7 @@ import (
 	"github.com/ideaspaper/restclient/pkg/history"
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/scripting"
+	"github.com/ideaspaper/restclient/pkg/secrets"
 	"github.com/ideaspaper/restclient/pkg/session"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
@@ -227,13 +228,15 @@ func (e *Executor) setupScriptContext(request *models.HttpRequest, resp *models.
 		scriptCtx.SetResponse(resp)
 	}
 
-	if e.config.EnvironmentVariables != nil {
-		if shared, ok := e.config.EnvironmentVariables["$shared"]; ok {
+	// Load environment variables from secrets store
+	store, err := secrets.Load()
+	if err == nil && store.EnvironmentVariables != nil {
+		if shared, ok := store.EnvironmentVariables["$shared"]; ok {
 			for k, v := range shared {
 				scriptCtx.SetEnvVar(k, v)
 			}
 		}
-		if current, ok := e.config.EnvironmentVariables[e.config.CurrentEnvironment]; ok {
+		if current, ok := store.EnvironmentVariables[e.config.CurrentEnvironment]; ok {
 			for k, v := range current {
 				scriptCtx.SetEnvVar(k, v)
 			}
@@ -299,13 +302,15 @@ func ExecutePreScriptWithContext(ctx context.Context, script string, cfg *config
 	scriptCtx := scripting.NewScriptContext()
 	scriptCtx.SetRequest(request)
 
-	if cfg.EnvironmentVariables != nil {
-		if shared, ok := cfg.EnvironmentVariables["$shared"]; ok {
+	// Load environment variables from secrets store
+	store, err := secrets.Load()
+	if err == nil && store.EnvironmentVariables != nil {
+		if shared, ok := store.EnvironmentVariables["$shared"]; ok {
 			for k, v := range shared {
 				scriptCtx.SetEnvVar(k, v)
 			}
 		}
-		if current, ok := cfg.EnvironmentVariables[cfg.CurrentEnvironment]; ok {
+		if current, ok := store.EnvironmentVariables[cfg.CurrentEnvironment]; ok {
 			for k, v := range current {
 				scriptCtx.SetEnvVar(k, v)
 			}
@@ -313,13 +318,13 @@ func ExecutePreScriptWithContext(ctx context.Context, script string, cfg *config
 	}
 
 	engine := scripting.NewEngine()
-	result, err := engine.ExecuteWithContext(ctx, script, scriptCtx)
-	if err != nil {
+	result, execErr := engine.ExecuteWithContext(ctx, script, scriptCtx)
+	if execErr != nil {
 		// Check for context cancellation
 		if ctx.Err() != nil {
 			return nil, errors.Wrap(ctx.Err(), "script execution cancelled")
 		}
-		return nil, errors.NewScriptErrorWithCause("pre-request", "script error", err)
+		return nil, errors.NewScriptErrorWithCause("pre-request", "script error", execErr)
 	}
 
 	if result.Error != nil {

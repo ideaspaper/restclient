@@ -12,6 +12,7 @@ import (
 	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/history"
 	"github.com/ideaspaper/restclient/pkg/models"
+	"github.com/ideaspaper/restclient/pkg/secrets"
 	"github.com/ideaspaper/restclient/pkg/tui"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
@@ -264,7 +265,12 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 
 	varProcessor := variables.NewVariableProcessor()
 	varProcessor.SetEnvironment(cfg.CurrentEnvironment)
-	varProcessor.SetEnvironmentVariables(cfg.EnvironmentVariables)
+
+	// Load environment variables from secrets store
+	store, err := secrets.Load()
+	if err == nil {
+		varProcessor.SetEnvironmentVariables(store.EnvironmentVariables)
+	}
 
 	// History already contains the Cookie header that was sent, no session needed
 	noSession = true
@@ -301,9 +307,15 @@ func loadConfig() (*config.Config, error) {
 	}
 
 	if environment != "" {
-		if err := cfg.SetEnvironment(environment); err != nil {
-			return nil, err
+		// Validate the environment exists in secrets
+		store, err := secrets.Load()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to load secrets")
 		}
+		if !store.HasEnvironment(environment) && environment != "$shared" {
+			return nil, errors.NewValidationErrorWithValue("environment", environment, "not found")
+		}
+		cfg.CurrentEnvironment = environment
 	}
 
 	return cfg, nil

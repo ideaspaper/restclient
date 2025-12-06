@@ -21,6 +21,7 @@ import (
 	"github.com/ideaspaper/restclient/pkg/lastfile"
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/parser"
+	"github.com/ideaspaper/restclient/pkg/secrets"
 	"github.com/ideaspaper/restclient/pkg/session"
 	"github.com/ideaspaper/restclient/pkg/tui"
 	"github.com/ideaspaper/restclient/pkg/userinput"
@@ -226,9 +227,15 @@ func loadSendConfig() (*config.Config, error) {
 	}
 
 	if environment != "" {
-		if err := cfg.SetEnvironment(environment); err != nil {
-			return nil, err
+		// Validate the environment exists in secrets
+		store, err := secrets.Load()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to load secrets")
 		}
+		if !store.HasEnvironment(environment) && environment != "$shared" {
+			return nil, errors.NewValidationErrorWithValue("environment", environment, "not found")
+		}
+		cfg.CurrentEnvironment = environment
 	}
 
 	return cfg, nil
@@ -266,7 +273,13 @@ func buildVariableProcessor(cfg *config.Config, filePath string, content []byte)
 
 	varProcessor := variables.NewVariableProcessor()
 	varProcessor.SetEnvironment(cfg.CurrentEnvironment)
-	varProcessor.SetEnvironmentVariables(cfg.EnvironmentVariables)
+
+	// Load environment variables from secrets store
+	store, err := secrets.Load()
+	if err == nil {
+		varProcessor.SetEnvironmentVariables(store.EnvironmentVariables)
+	}
+
 	varProcessor.SetFileVariables(fileVarsResult.Variables)
 	varProcessor.SetCurrentDir(filepath.Dir(filePath))
 	varProcessor.SetPromptHandler(promptHandler)
