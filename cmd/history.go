@@ -7,12 +7,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ideaspaper/restclient/internal/filesystem"
 	"github.com/ideaspaper/restclient/internal/stringutil"
 	"github.com/ideaspaper/restclient/pkg/config"
 	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/history"
+	"github.com/ideaspaper/restclient/pkg/lastfile"
 	"github.com/ideaspaper/restclient/pkg/models"
-	"github.com/ideaspaper/restclient/pkg/secrets"
+	"github.com/ideaspaper/restclient/pkg/session"
 	"github.com/ideaspaper/restclient/pkg/tui"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
@@ -258,18 +260,19 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 		request.Body = strings.NewReader(item.Body)
 	}
 
-	cfg, err := loadConfig()
+	cfg, sessionCfg, envStore, err := loadConfig()
 	if err != nil {
 		return err
 	}
+	// Silence unused variable warning - cfg is for CLI preferences (not used in replay)
+	_ = cfg
 
 	varProcessor := variables.NewVariableProcessor()
-	varProcessor.SetEnvironment(cfg.CurrentEnvironment)
+	varProcessor.SetEnvironment(sessionCfg.CurrentEnvironment())
 
-	// Load environment variables from secrets store
-	store, err := secrets.Load()
-	if err == nil {
-		varProcessor.SetEnvironmentVariables(store.EnvironmentVariables)
+	// Load environment variables from per-session environment store
+	if envStore != nil {
+		varProcessor.SetEnvironmentVariables(envStore.EnvironmentVariables)
 	}
 
 	// History already contains the Cookie header that was sent, no session needed
@@ -277,7 +280,7 @@ func runHistoryReplay(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("%s %s\n\n", printMethod(request.Method), request.URL)
 
-	return sendRequest("", request, cfg, varProcessor)
+	return sendRequest("", request, sessionCfg, varProcessor, envStore)
 }
 
 // selectHistoryItem shows an interactive selector for history items
@@ -300,25 +303,48 @@ func printHistoryItem(item models.HistoricalHttpRequest, index int) {
 	fmt.Println(formatter.FormatItem(item, index))
 }
 
-func loadConfig() (*config.Config, error) {
+func loadConfig() (*config.Config, *session.SessionConfig, *session.EnvironmentStore, error) {
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load config")
+		return nil, nil, nil, errors.Wrap(err, "failed to load config")
+	}
+
+	// Try to get session context from lastfile
+	var envStore *session.EnvironmentStore
+	var sessionCfg *session.SessionConfig
+	lastPath, _ := lastfile.Load()
+	if lastPath != "" {
+		sessionMgr, err := session.NewSessionManager("", lastPath, sessionName)
+		if err == nil {
+			sessionPath := sessionMgr.GetSessionPath()
+			sessionCfg, err = session.LoadOrCreateSessionConfig(filesystem.Default, sessionPath)
+			if err != nil {
+				sessionCfg = session.DefaultSessionConfig()
+			}
+			envStore, err = session.LoadOrCreateEnvironmentStore(filesystem.Default, sessionPath)
+			if err != nil {
+				envStore = nil // Fall back to no environment store
+			}
+		}
+	}
+
+	// Default session config if none loaded
+	if sessionCfg == nil {
+		sessionCfg = session.DefaultSessionConfig()
 	}
 
 	if environment != "" {
-		// Validate the environment exists in secrets
-		store, err := secrets.Load()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to load secrets")
+		// Validate the environment exists in session
+		if envStore == nil {
+			return nil, nil, nil, errors.NewValidationError("environment", "no session context available (run 'send' first)")
 		}
-		if !store.HasEnvironment(environment) && environment != "$shared" {
-			return nil, errors.NewValidationErrorWithValue("environment", environment, "not found")
+		if !envStore.HasEnvironment(environment) && environment != "$shared" {
+			return nil, nil, nil, errors.NewValidationErrorWithValue("environment", environment, "not found")
 		}
-		cfg.CurrentEnvironment = environment
+		sessionCfg.SetCurrentEnvironment(environment)
 	}
 
-	return cfg, nil
+	return cfg, sessionCfg, envStore, nil
 }
 
 // newHistoryFormatter creates a history formatter with color support

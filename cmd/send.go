@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/ideaspaper/restclient/internal/filesystem"
 	"github.com/ideaspaper/restclient/internal/stringutil"
 	"github.com/ideaspaper/restclient/pkg/config"
 	"github.com/ideaspaper/restclient/pkg/errors"
@@ -21,7 +22,6 @@ import (
 	"github.com/ideaspaper/restclient/pkg/lastfile"
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/parser"
-	"github.com/ideaspaper/restclient/pkg/secrets"
 	"github.com/ideaspaper/restclient/pkg/session"
 	"github.com/ideaspaper/restclient/pkg/tui"
 	"github.com/ideaspaper/restclient/pkg/userinput"
@@ -75,7 +75,6 @@ var (
 	sessionName  string
 	noSession    bool
 	strictMode   bool
-	useCached    bool
 )
 
 // sendCmd represents the send command
@@ -129,7 +128,6 @@ func init() {
 	sendCmd.Flags().StringVar(&sessionName, "session", "", "use named session instead of directory-based session")
 	sendCmd.Flags().BoolVar(&noSession, "no-session", false, "don't load or save session state (cookies and variables)")
 	sendCmd.Flags().BoolVar(&strictMode, "strict", false, "error on duplicate @name values instead of warning")
-	sendCmd.Flags().BoolVar(&useCached, "use-cached", false, "use cached session values for user input ({{:paramName}}) instead of prompting")
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
@@ -138,7 +136,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfg, err := loadSendConfig()
+	cfg, sessionCfg, envStore, err := loadSendConfig(filePath)
 	if err != nil {
 		return err
 	}
@@ -148,9 +146,9 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	varProcessor := buildVariableProcessor(cfg, filePath, content)
+	varProcessor := buildVariableProcessor(sessionCfg, filePath, content, envStore)
 
-	requests, parseWarnings, err := parseRequestsFromContent(content, cfg, filePath)
+	requests, parseWarnings, err := parseRequestsFromContent(content, sessionCfg, filePath)
 	if err != nil {
 		return err
 	}
@@ -178,7 +176,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := runPreRequestScript(request, cfg, varProcessor); err != nil {
+	if err := runPreRequestScript(request, sessionCfg, varProcessor, envStore); err != nil {
 		if errors.Is(err, errors.ErrCanceled) {
 			return nil
 		}
@@ -194,12 +192,12 @@ func runSend(cmd *cobra.Command, args []string) error {
 	}
 
 	if dryRun {
-		return printDryRun(filePath, request, cfg)
+		return printDryRun(filePath, request, cfg, sessionCfg)
 	}
 
 	fmt.Printf("%s %s\n\n", printMethod(request.Method), request.URL)
 
-	return sendRequest(filePath, request, cfg, varProcessor)
+	return sendRequest(filePath, request, sessionCfg, varProcessor, envStore)
 }
 
 func resolveRequestFilePath(cmd *cobra.Command, args []string) (string, error) {
@@ -220,25 +218,45 @@ func resolveRequestFilePath(cmd *cobra.Command, args []string) (string, error) {
 	return lastPath, nil
 }
 
-func loadSendConfig() (*config.Config, error) {
+func loadSendConfig(filePath string) (*config.Config, *session.SessionConfig, *session.EnvironmentStore, error) {
+	// Load global config (CLI preferences only)
 	cfg, err := config.LoadOrCreateConfig()
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load config")
+		return nil, nil, nil, errors.Wrap(err, "failed to load config")
 	}
 
+	// Get session path for this file
+	sessionMgr, err := session.NewSessionManager("", filePath, sessionName)
+	if err != nil {
+		return nil, nil, nil, errors.Wrap(err, "failed to create session manager")
+	}
+	sessionPath := sessionMgr.GetSessionPath()
+
+	// Load or create session config (HTTP behavior)
+	sessionCfg, err := session.LoadOrCreateSessionConfig(filesystem.Default, sessionPath)
+	if err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load session config: %v\n", err)
+		}
+		// Use default session config if loading fails
+		sessionCfg = session.DefaultSessionConfig()
+	}
+
+	// Load or create session environment store
+	envStore, err := session.LoadOrCreateEnvironmentStore(filesystem.Default, sessionPath)
+	if err != nil {
+		return nil, nil, nil, errors.Wrap(err, "failed to load session environments")
+	}
+
+	// Override environment from command line flag
 	if environment != "" {
-		// Validate the environment exists in secrets
-		store, err := secrets.Load()
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to load secrets")
+		if !envStore.HasEnvironment(environment) && environment != "$shared" {
+			return nil, nil, nil, errors.NewValidationErrorWithValue("environment", environment, "not found")
 		}
-		if !store.HasEnvironment(environment) && environment != "$shared" {
-			return nil, errors.NewValidationErrorWithValue("environment", environment, "not found")
-		}
-		cfg.CurrentEnvironment = environment
+		sessionCfg.SetCurrentEnvironment(environment)
 	}
 
-	return cfg, nil
+	return cfg, sessionCfg, envStore, nil
 }
 
 func readRequestFile(filePath string) ([]byte, error) {
@@ -256,7 +274,7 @@ func readRequestFile(filePath string) ([]byte, error) {
 	return content, nil
 }
 
-func buildVariableProcessor(cfg *config.Config, filePath string, content []byte) *variables.VariableProcessor {
+func buildVariableProcessor(sessionCfg *session.SessionConfig, filePath string, content []byte, envStore *session.EnvironmentStore) *variables.VariableProcessor {
 	fileVarsResult := variables.ParseFileVariablesWithDuplicates(string(content))
 
 	if len(fileVarsResult.Duplicates) > 0 {
@@ -272,12 +290,11 @@ func buildVariableProcessor(cfg *config.Config, filePath string, content []byte)
 	}
 
 	varProcessor := variables.NewVariableProcessor()
-	varProcessor.SetEnvironment(cfg.CurrentEnvironment)
+	varProcessor.SetEnvironment(sessionCfg.CurrentEnvironment())
 
-	// Load environment variables from secrets store
-	store, err := secrets.Load()
-	if err == nil {
-		varProcessor.SetEnvironmentVariables(store.EnvironmentVariables)
+	// Load environment variables from session environment store
+	if envStore != nil {
+		varProcessor.SetEnvironmentVariables(envStore.EnvironmentVariables)
 	}
 
 	varProcessor.SetFileVariables(fileVarsResult.Variables)
@@ -287,8 +304,8 @@ func buildVariableProcessor(cfg *config.Config, filePath string, content []byte)
 	return varProcessor
 }
 
-func parseRequestsFromContent(content []byte, cfg *config.Config, filePath string) ([]*models.HttpRequest, []parser.ParseWarning, error) {
-	httpParser := parser.NewHttpRequestParser(string(content), cfg.DefaultHeaders, filepath.Dir(filePath))
+func parseRequestsFromContent(content []byte, sessionCfg *session.SessionConfig, filePath string) ([]*models.HttpRequest, []parser.ParseWarning, error) {
+	httpParser := parser.NewHttpRequestParser(string(content), sessionCfg.DefaultHeaders(), filepath.Dir(filePath))
 	parseResult := httpParser.ParseAllWithWarnings()
 	requests := parseResult.Requests
 
@@ -424,7 +441,7 @@ func processSessionInputs(request *models.HttpRequest, filePath string) error {
 		}
 	}
 
-	inputPrompter := userinput.NewPrompter(sessionMgr, !useCached, useColors())
+	inputPrompter := userinput.NewPrompter(nil, true, useColors())
 
 	if inputPrompter.HasPatterns(request.URL) {
 		result, err := inputPrompter.ProcessURL(request.URL)
@@ -435,18 +452,6 @@ func processSessionInputs(request *models.HttpRequest, filePath string) error {
 			return errors.Wrap(err, "failed to process user input variables in URL")
 		}
 		request.URL = result.URL
-
-		if !result.Prompted && len(result.Patterns) > 0 {
-			fmt.Println()
-			for _, pattern := range result.Patterns {
-				value := result.Values[pattern.Name]
-				if result.Secrets[pattern.Name] {
-					value = "<secret>"
-				}
-				fmt.Printf("- %s: %s\n", pattern.Name, value)
-			}
-			fmt.Println()
-		}
 	}
 
 	urlKey := inputPrompter.GenerateKey(request.URL)
@@ -523,7 +528,7 @@ func applyPromptVariables(request *models.HttpRequest, varProcessor *variables.V
 	return nil
 }
 
-func runPreRequestScript(request *models.HttpRequest, cfg *config.Config, varProcessor *variables.VariableProcessor) error {
+func runPreRequestScript(request *models.HttpRequest, sessionCfg *session.SessionConfig, varProcessor *variables.VariableProcessor, envStore *session.EnvironmentStore) error {
 	if request.Metadata.PreScript == "" {
 		return nil
 	}
@@ -543,7 +548,7 @@ func runPreRequestScript(request *models.HttpRequest, cfg *config.Config, varPro
 		cancel()
 	}()
 
-	result, err := executor.ExecutePreScriptWithContext(ctx, request.Metadata.PreScript, cfg, request, varProcessor)
+	result, err := executor.ExecutePreScriptWithContext(ctx, request.Metadata.PreScript, sessionCfg, request, varProcessor, envStore)
 	if err != nil {
 		if ctx.Err() == context.Canceled {
 			return errors.Wrap(errors.ErrCanceled, "pre-script cancelled")

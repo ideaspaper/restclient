@@ -148,7 +148,6 @@ restclient send [file.http] [flags]
 | `--session` | | Use a named session instead of directory-based |
 | `--no-session` | | Don't load or save session state |
 | `--strict` | | Error on duplicate `@name` values instead of warning |
-| `--use-cached` | | Use cached session values for user input (`{{:paramName}}`) instead of prompting |
 
 **Examples:**
 
@@ -186,10 +185,14 @@ Manage environments and variables.
 restclient env <subcommand> [args]
 ```
 
+Environment variables are stored **per-session** in `~/.restclient/session/<kind>/<id>/environments.json`. Each session automatically gets `$shared` and `development` environments on creation. The `$shared` environment contains variables available to all environments within that session.
+
+Sessions are scoped by the directory of your `.http` file (via a hash) or by an explicit `--session` name. This keeps projects isolated automatically.
+
 **Subcommands:**
 | Command | Description |
 |---------|-------------|
-| `list` | List all environments |
+| `list` | List all environments in the current session |
 | `current` | Show current environment |
 | `use <env>` | Switch to an environment |
 | `show [env]` | Show variables in an environment |
@@ -198,28 +201,37 @@ restclient env <subcommand> [args]
 | `create <env>` | Create a new environment |
 | `delete <env>` | Delete an environment |
 
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--session` | Use a named session instead of directory-based |
+| `--dir` | Use session for a specific directory |
+
 **Examples:**
 
 ```bash
-# Create environments
+# Create environments in your current session
 restclient env create development
 restclient env create production
 
-# Set variables
+# Set variables (stored in that session's environments.json)
 restclient env set development API_URL https://dev.api.example.com
 restclient env set production API_URL https://api.example.com
 restclient env set '$shared' API_KEY my-api-key  # Shared across all environments
 
-# Switch environment
+# Switch environment (persists to session config)
 restclient env use production
 
 # View variables
 restclient env show production
+
+# Use a named session (shared across directories)
+restclient env set production API_KEY secret123 --session my-shared-api
 ```
 
 ### history
 
-View and manage request history. History stores the exact request that was sent, including all headers (such as cookies from the session), so `replay` reproduces the original request exactly.
+View and manage request history. History stores the exact request that was sent, including all headers (such as cookies from the session), so `replay` reproduces the original request exactly. Each invocation resolves the same session scoping rules as `send`, meaning history entries are separated per directory hash or `--session` name.
 
 When no index is provided to `show` or `replay`, an interactive fuzzy-search selector is displayed.
 
@@ -736,7 +748,7 @@ GET https://api.example.com/search?q={{%searchTerm}}
 
 ### User Input Variables
 
-User input variables use the `{{:paramName}}` syntax and are ideal for dynamic path parameters, query parameters, headers, and request bodies. By default, you'll be prompted to enter values each time you run a request. Values are saved to your session and can be reused with the `--use-cached` flag.
+User input variables use the `{{:paramName}}` syntax and are ideal for dynamic path parameters, query parameters, headers, and request bodies. You'll be prompted to enter values each time you run a request.
 
 **Syntax:**
 
@@ -765,10 +777,9 @@ Authorization: Bearer {{:apiToken!secret}}
 ```
 
 Secret inputs have special handling:
+
 - **Masked during entry**: Password-style input field (characters hidden)
 - **Masked in output**: Displayed as `<secret>` in CLI output and TUI summaries
-- **Stored securely**: Values are still saved to session files for `--use-cached` reuse
-- **Promotion**: If the same parameter appears both with and without `!secret`, the secret flag is applied to all occurrences
 
 **Supported Locations:**
 
@@ -782,11 +793,9 @@ Secret inputs have special handling:
 
 **Features:**
 
-- **Interactive prompting**: Each run prompts for all parameters via a TUI form (default behavior)
+- **Interactive prompting**: Each run prompts for all parameters via a TUI form
 - **Secret inputs**: Use `{{:param!secret}}` for masked password-style input
-- **Session persistence**: Values are saved to session for optional reuse
-- **Use cached values**: Use `--use-cached` flag to skip prompting and reuse session values
-- **Unique per URL pattern**: Different endpoints maintain separate values
+- **Unique per request**: Values are collected fresh on every execution
 - **Duplicate handling**: Same parameter name used multiple times prompts once
 
 **Basic Examples:**
@@ -863,16 +872,13 @@ The `userId` value is shared between the URL and the `X-User-Id` header.
 **Command Line Examples:**
 
 ```bash
-# Prompts for :id value (default behavior)
+# Prompts for :id value
 restclient send api.http --name getPostById
 # Enter value for id: 123
 
-# Prompts again for new value (default behavior)
+# Prompts again for new value (values are not cached)
 restclient send api.http --name getPostById
 # Enter value for id: 456
-
-# Use cached value from session (id=456)
-restclient send api.http --name getPostById --use-cached
 ```
 
 **Notes:**
@@ -880,11 +886,7 @@ restclient send api.http --name getPostById --use-cached
 - User input variables are processed **before** regular `{{varName}}` variables
 - Values are automatically URL-encoded when replaced in URLs (not in headers/body)
 - Use `{{:param!secret}}` for sensitive values - they are masked in the TUI and CLI output
-- Secret values are still stored in session files for `--use-cached` reuse
-- Session values are scoped per URL pattern (different endpoints have separate values)
-- Session values are cleared with `restclient session clear`
-- Use `--no-session` to disable session storage entirely
-- Use `--use-cached` to reuse previously entered values from the session
+- Values are collected fresh on every run (no caching between invocations)
 
 ## Scripting
 
@@ -892,20 +894,22 @@ restclient supports JavaScript scripting for testing responses and sharing data 
 
 ### Session Persistence
 
-By default, restclient persists certain data between CLI invocations. Sessions are scoped by directory (based on the `.http` file location), so different projects have isolated sessions automatically.
+By default, restclient persists certain data between CLI invocations. Sessions are scoped by directory (based on the `.http` file location) or an explicit `--session` name.
 
-| Data Type                                 | Persisted? | Notes                         |
-| ----------------------------------------- | ---------- | ----------------------------- |
-| Cookies (`Set-Cookie` headers)            | Yes        | Automatic                     |
-| Script variables (`client.global.set()`)  | Yes        | Use scripts to store/retrieve |
-| File variables (`@var = value`)           | No         | Re-read each invocation       |
-| Request variables (`{{req.response...}}`) | No         | Single execution only         |
+| Data Type                                 | Persisted? | Notes                                   |
+| ----------------------------------------- | ---------- | --------------------------------------- |
+| Cookies (`Set-Cookie` headers)            | Yes        | Stored in `<session>/cookies.json`      |
+| Script variables (`client.global.set()`)  | Yes        | Stored in `<session>/variables.json`    |
+| Environment variables                     | Yes        | Stored in `<session>/environments.json` |
+| User input values (`{{:param}}`)          | No         | Prompted fresh on every run             |
+| File variables (`@var = value`)           | No         | Re-read each invocation                 |
+| Request variables (`{{req.response...}}`) | No         | Single execution only                   |
 
-```bash
+```
 # Use a named session for isolation
 restclient send api.http --session my-test
 
-# Disable session persistence
+# Disable session persistence entirely
 restclient send api.http --no-session
 ```
 
@@ -1178,48 +1182,108 @@ Authorization: AWS accessKeyId secretAccessKey token:sessionToken region:us-west
 
 ## Configuration
 
-restclient uses two separate files for configuration:
+restclient separates configuration into two layers:
 
-- **`~/.restclient/config.json`** - General settings (safe to commit to version control)
-- **`~/.restclient/secrets.json`** - Environment variables and secrets (should be gitignored)
+- **Global config:** `~/.restclient/config.json` stores CLI display preferences only
+- **Session config:** `~/.restclient/session/<kind>/<id>/config.json` stores all HTTP behavior settings
 
-This separation allows you to share configuration settings while keeping sensitive data local.
+### Global Config
 
-### config.json
-
-General settings are stored in `~/.restclient/config.json`:
+CLI display preferences are stored in `~/.restclient/config.json`:
 
 ```json
 {
-  "followRedirect": true,
-  "timeoutInMilliseconds": 0,
-  "rememberCookiesForSubsequentRequests": true,
-  "defaultHeaders": {
-    "User-Agent": "restclient-cli"
-  },
-  "currentEnvironment": "development",
-  "insecureSSL": false,
-  "proxy": "",
-  "excludeHostsForProxy": [],
-  "certificates": {},
   "previewOption": "full",
   "showColors": true
 }
 ```
 
-### secrets.json
+| Option          | Description                               | Default |
+| --------------- | ----------------------------------------- | ------- |
+| `previewOption` | Output mode: `full`, `headers`, or `body` | `full`  |
+| `showColors`    | Colorized terminal output                 | `true`  |
 
-Environment variables are stored separately in `~/.restclient/secrets.json`:
+### Session Config
+
+Sessions are scoped by directory (based on the `.http` file location) or by an explicit `--session` name. Each session directory (`~/.restclient/session/<kind>/<id>/`) contains:
+
+| File                | Description                                    |
+| ------------------- | ---------------------------------------------- |
+| `config.json`       | All HTTP behavior settings for this session    |
+| `environments.json` | Environment variables for this session         |
+| `cookies.json`      | HTTP cookies from responses                    |
+| `variables.json`    | Script variables set via `client.global.set()` |
+
+The session `config.json` controls all HTTP behavior:
+
+```json
+{
+  "version": 1,
+  "environment": {
+    "current": "",
+    "rememberCookiesForSubsequentRequests": true,
+    "defaultHeaders": {
+      "User-Agent": "restclient-cli"
+    }
+  },
+  "http": {
+    "timeoutInMilliseconds": 0,
+    "followRedirect": true,
+    "cookieJar": "cookies.json"
+  },
+  "tls": {
+    "insecureSSL": false,
+    "proxy": "",
+    "excludeHostsForProxy": [],
+    "certificates": {}
+  }
+}
+```
+
+#### Session Config Options
+
+| Section       | Option                                 | Description                              | Default                            |
+| ------------- | -------------------------------------- | ---------------------------------------- | ---------------------------------- |
+| `environment` | `current`                              | Active environment name                  | `""`                               |
+| `environment` | `rememberCookiesForSubsequentRequests` | Persist cookies between requests         | `true`                             |
+| `environment` | `defaultHeaders`                       | Headers added to all requests            | `{"User-Agent": "restclient-cli"}` |
+| `http`        | `timeoutInMilliseconds`                | Request timeout (0 = no timeout)         | `0`                                |
+| `http`        | `followRedirect`                       | Follow HTTP redirects                    | `true`                             |
+| `http`        | `cookieJar`                            | Cookie storage file name                 | `"cookies.json"`                   |
+| `tls`         | `insecureSSL`                          | Skip SSL certificate verification        | `false`                            |
+| `tls`         | `proxy`                                | HTTP proxy URL                           | `""`                               |
+| `tls`         | `excludeHostsForProxy`                 | Hosts to bypass proxy                    | `[]`                               |
+| `tls`         | `certificates`                         | Per-host client certificates (see below) | `{}`                               |
+
+#### Client Certificates
+
+To configure client certificates for mutual TLS:
+
+```json
+{
+  "tls": {
+    "certificates": {
+      "api.example.com": {
+        "cert": "/path/to/client.crt",
+        "key": "/path/to/client.key"
+      }
+    }
+  }
+}
+```
+
+### Environment Variables
+
+Environment variables are stored **per-session** in `environments.json`:
 
 ```json
 {
   "environmentVariables": {
     "$shared": {
-      "API_KEY": "shared-key-for-all-environments"
+      "API_KEY": "my-api-key"
     },
     "development": {
-      "API_URL": "https://dev.api.example.com",
-      "DEBUG": "true"
+      "API_URL": "https://dev.api.example.com"
     },
     "production": {
       "API_URL": "https://api.example.com"
@@ -1228,24 +1292,12 @@ Environment variables are stored separately in `~/.restclient/secrets.json`:
 }
 ```
 
-The `$shared` environment contains variables that are available in all environments. Environment-specific variables override shared variables with the same name.
+The `$shared` environment contains variables available to all environments within that session. New sessions automatically get `$shared` and `development` environments.
 
 **Security:**
-- The secrets file is created with restrictive permissions (`0600` - owner read/write only)
-- Add `secrets.json` to your `.gitignore` to prevent accidentally committing secrets
 
-### Configuration Options
-
-| Option                                 | Description                       | Default                            |
-| -------------------------------------- | --------------------------------- | ---------------------------------- |
-| `followRedirect`                       | Follow HTTP redirects             | `true`                             |
-| `timeoutInMilliseconds`                | Request timeout (0 = no timeout)  | `0`                                |
-| `rememberCookiesForSubsequentRequests` | Persist cookies between requests  | `true`                             |
-| `defaultHeaders`                       | Headers added to all requests     | `{"User-Agent": "restclient-cli"}` |
-| `insecureSSL`                          | Skip SSL certificate verification | `false`                            |
-| `proxy`                                | HTTP proxy URL                    | `""`                               |
-| `excludeHostsForProxy`                 | Hosts to bypass proxy             | `[]`                               |
-| `showColors`                           | Colorized output                  | `true`                             |
+- Session files are written with `0600` permissions (owner read/write only)
+- Session directories should NOT be committed to version control
 
 ## Global Flags
 
@@ -1358,7 +1410,7 @@ Variables now resolve strictly, so missing values stop execution before any requ
 1. Check if the variable is defined in file variables, the active environment, or `$shared`
 2. Verify the current environment with `restclient env current`
 3. Check variable spelling (case-sensitive)
-4. Ensure `$prompt` variables have a handler available (TTY session or `--use-cached`)
+4. Ensure `$prompt` variables have a handler available (TTY session)
 
 ### Request Validation Errors
 

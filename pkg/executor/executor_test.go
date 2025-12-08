@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ideaspaper/restclient/pkg/config"
 	"github.com/ideaspaper/restclient/pkg/models"
+	"github.com/ideaspaper/restclient/pkg/session"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
 
@@ -116,12 +116,11 @@ func TestExecutor_Execute(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				RememberCookies: false,
-			}
+			sessionCfg := session.DefaultSessionConfig()
+			sessionCfg.Environment.RememberCookies = false
 			varProcessor := variables.NewVariableProcessor()
 
-			exec := New(cfg, varProcessor, Options{
+			exec := New(sessionCfg, varProcessor, Options{
 				NoSession: true,
 				NoHistory: true,
 			})
@@ -151,12 +150,11 @@ func TestExecutor_ExecuteWithContext(t *testing.T) {
 	defer server.Close()
 
 	t.Run("context cancellation", func(t *testing.T) {
-		cfg := &config.Config{
-			RememberCookies: false,
-		}
+		sessionCfg := session.DefaultSessionConfig()
+		sessionCfg.Environment.RememberCookies = false
 		varProcessor := variables.NewVariableProcessor()
 
-		exec := New(cfg, varProcessor, Options{
+		exec := New(sessionCfg, varProcessor, Options{
 			NoSession: true,
 			NoHistory: true,
 		})
@@ -177,12 +175,11 @@ func TestExecutor_ExecuteWithContext(t *testing.T) {
 	})
 
 	t.Run("successful request with context", func(t *testing.T) {
-		cfg := &config.Config{
-			RememberCookies: false,
-		}
+		sessionCfg := session.DefaultSessionConfig()
+		sessionCfg.Environment.RememberCookies = false
 		varProcessor := variables.NewVariableProcessor()
 
-		exec := New(cfg, varProcessor, Options{
+		exec := New(sessionCfg, varProcessor, Options{
 			NoSession: true,
 			NoHistory: true,
 		})
@@ -215,12 +212,13 @@ func TestExecutor_ExecuteWithContext_PreCancelled(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := &config.Config{RememberCookies: false}
+	sessionCfg := session.DefaultSessionConfig()
+	sessionCfg.Environment.RememberCookies = false
 	varProcessor := variables.NewVariableProcessor()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	exec := New(cfg, varProcessor, Options{NoSession: true, NoHistory: true})
+	exec := New(sessionCfg, varProcessor, Options{NoSession: true, NoHistory: true})
 	request := &models.HttpRequest{
 		Method:  "GET",
 		URL:     server.URL,
@@ -247,9 +245,10 @@ func TestExecutor_PostScriptCancellation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := &config.Config{RememberCookies: false}
+	sessionCfg := session.DefaultSessionConfig()
+	sessionCfg.Environment.RememberCookies = false
 	varProcessor := variables.NewVariableProcessor()
-	exec := New(cfg, varProcessor, Options{NoSession: true, NoHistory: true})
+	exec := New(sessionCfg, varProcessor, Options{NoSession: true, NoHistory: true})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -357,12 +356,11 @@ func TestExecutor_WithPostScript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				RememberCookies: false,
-			}
+			sessionCfg := session.DefaultSessionConfig()
+			sessionCfg.Environment.RememberCookies = false
 			varProcessor := variables.NewVariableProcessor()
 
-			exec := New(cfg, varProcessor, Options{
+			exec := New(sessionCfg, varProcessor, Options{
 				NoSession: true,
 				NoHistory: true,
 			})
@@ -500,7 +498,7 @@ func TestExecutePreScript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{}
+			sessionCfg := session.DefaultSessionConfig()
 			varProcessor := variables.NewVariableProcessor()
 			request := &models.HttpRequest{
 				Method:  "GET",
@@ -508,7 +506,7 @@ func TestExecutePreScript(t *testing.T) {
 				Headers: map[string]string{},
 			}
 
-			result, err := ExecutePreScript(tt.script, cfg, request, varProcessor)
+			result, err := ExecutePreScript(tt.script, sessionCfg, request, varProcessor, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ExecutePreScript() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -536,7 +534,7 @@ func TestExecutePreScript(t *testing.T) {
 
 func TestExecutePreScriptWithContext(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
-		cfg := &config.Config{}
+		sessionCfg := session.DefaultSessionConfig()
 		varProcessor := variables.NewVariableProcessor()
 		request := &models.HttpRequest{
 			Method:  "GET",
@@ -555,7 +553,7 @@ func TestExecutePreScriptWithContext(t *testing.T) {
 			}
 		`
 
-		_, err := ExecutePreScriptWithContext(ctx, script, cfg, request, varProcessor)
+		_, err := ExecutePreScriptWithContext(ctx, script, sessionCfg, request, varProcessor, nil)
 		if err == nil {
 			t.Error("Expected error due to context cancellation")
 		}
@@ -574,12 +572,11 @@ func TestExecutor_RequestResultStorage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := &config.Config{
-		RememberCookies: false,
-	}
+	sessionCfg := session.DefaultSessionConfig()
+	sessionCfg.Environment.RememberCookies = false
 	varProcessor := variables.NewVariableProcessor()
 
-	exec := New(cfg, varProcessor, Options{
+	exec := New(sessionCfg, varProcessor, Options{
 		NoSession: true,
 		NoHistory: true,
 	})

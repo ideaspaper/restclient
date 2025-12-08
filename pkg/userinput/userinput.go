@@ -144,37 +144,35 @@ func (d *Detector) replaceInternal(content string, values map[string]string, enc
 	return replacer
 }
 
-// GenerateKey creates a session storage key from a URL pattern.
-// The key is created by normalizing the URL to include only the path and
-// user input patterns, allowing different requests with the same pattern
-// structure to share stored values.
+// GenerateKey creates a session storage key from a URL pattern (host + path + query).
+// Use Detector.GenerateRequestKey to include additional context like HTTP method.
 func (d *Detector) GenerateKey(urlStr string) string {
-	// Parse the URL to extract relevant parts
 	parsed, err := url.Parse(urlStr)
 	if err != nil {
-		// If we can't parse, use the whole URL as the key
 		return urlStr
 	}
 
-	// Build key from host + path + query with patterns
 	var keyParts []string
-
-	// Include host for uniqueness across different APIs
 	if parsed.Host != "" {
 		keyParts = append(keyParts, parsed.Host)
 	}
-
-	// Include path
 	if parsed.Path != "" {
 		keyParts = append(keyParts, parsed.Path)
 	}
-
-	// Include raw query to preserve user input patterns
 	if parsed.RawQuery != "" {
 		keyParts = append(keyParts, "?"+parsed.RawQuery)
 	}
 
 	return strings.Join(keyParts, "")
+}
+
+// GenerateRequestKey extends GenerateKey by prefixing the HTTP method when provided.
+func (d *Detector) GenerateRequestKey(method, urlStr string) string {
+	baseKey := d.GenerateKey(urlStr)
+	if method == "" {
+		return baseKey
+	}
+	return strings.ToUpper(method) + " " + baseKey
 }
 
 // ExtractPatternNames returns a list of unique parameter names from a URL.

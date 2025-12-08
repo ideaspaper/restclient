@@ -10,12 +10,10 @@ import (
 	"strings"
 
 	"github.com/ideaspaper/restclient/pkg/client"
-	"github.com/ideaspaper/restclient/pkg/config"
 	"github.com/ideaspaper/restclient/pkg/errors"
 	"github.com/ideaspaper/restclient/pkg/history"
 	"github.com/ideaspaper/restclient/pkg/models"
 	"github.com/ideaspaper/restclient/pkg/scripting"
-	"github.com/ideaspaper/restclient/pkg/secrets"
 	"github.com/ideaspaper/restclient/pkg/session"
 	"github.com/ideaspaper/restclient/pkg/variables"
 )
@@ -34,6 +32,8 @@ type Options struct {
 	Verbose bool
 	// LogFunc is called with log messages (optional)
 	LogFunc func(format string, args ...any)
+	// EnvironmentStore provides per-session environment variables (optional)
+	EnvironmentStore *session.EnvironmentStore
 }
 
 // Result contains the execution result
@@ -45,17 +45,17 @@ type Result struct {
 
 // Executor handles HTTP request execution
 type Executor struct {
-	config       *config.Config
-	varProcessor *variables.VariableProcessor
-	options      Options
+	sessionConfig *session.SessionConfig
+	varProcessor  *variables.VariableProcessor
+	options       Options
 }
 
 // New creates a new Executor
-func New(cfg *config.Config, varProcessor *variables.VariableProcessor, opts Options) *Executor {
+func New(sessionCfg *session.SessionConfig, varProcessor *variables.VariableProcessor, opts Options) *Executor {
 	return &Executor{
-		config:       cfg,
-		varProcessor: varProcessor,
-		options:      opts,
+		sessionConfig: sessionCfg,
+		varProcessor:  varProcessor,
+		options:       opts,
 	}
 }
 
@@ -74,7 +74,7 @@ func (e *Executor) ExecuteWithContext(ctx context.Context, request *models.HttpR
 	result := &Result{}
 
 	var sessionMgr *session.SessionManager
-	if !e.options.NoSession && e.config.RememberCookies {
+	if !e.options.NoSession && e.sessionConfig.RememberCookies() {
 		var err error
 		sessionMgr, err = session.NewSessionManager("", e.options.HTTPFilePath, e.options.SessionName)
 		if err != nil {
@@ -96,7 +96,7 @@ func (e *Executor) ExecuteWithContext(ctx context.Context, request *models.HttpR
 	}
 
 	// Create HTTP client
-	clientCfg := e.config.ToClientConfig()
+	clientCfg := e.sessionConfig.ToClientConfig()
 	if request.Metadata.NoRedirect {
 		clientCfg.FollowRedirects = false
 	}
@@ -228,15 +228,14 @@ func (e *Executor) setupScriptContext(request *models.HttpRequest, resp *models.
 		scriptCtx.SetResponse(resp)
 	}
 
-	// Load environment variables from secrets store
-	store, err := secrets.Load()
-	if err == nil && store.EnvironmentVariables != nil {
-		if shared, ok := store.EnvironmentVariables["$shared"]; ok {
+	// Load environment variables from per-session environment store
+	if e.options.EnvironmentStore != nil && e.options.EnvironmentStore.EnvironmentVariables != nil {
+		if shared, ok := e.options.EnvironmentStore.EnvironmentVariables["$shared"]; ok {
 			for k, v := range shared {
 				scriptCtx.SetEnvVar(k, v)
 			}
 		}
-		if current, ok := store.EnvironmentVariables[e.config.CurrentEnvironment]; ok {
+		if current, ok := e.options.EnvironmentStore.EnvironmentVariables[e.sessionConfig.CurrentEnvironment()]; ok {
 			for k, v := range current {
 				scriptCtx.SetEnvVar(k, v)
 			}
@@ -293,24 +292,23 @@ func ApplyScriptGlobalVars(varProcessor *variables.VariableProcessor, globalVars
 
 // ExecutePreScript executes a pre-request script.
 // It uses context.Background(). For cancellation support, use ExecutePreScriptWithContext.
-func ExecutePreScript(script string, cfg *config.Config, request *models.HttpRequest, varProcessor *variables.VariableProcessor) (*scripting.ScriptResult, error) {
-	return ExecutePreScriptWithContext(context.Background(), script, cfg, request, varProcessor)
+func ExecutePreScript(script string, sessionCfg *session.SessionConfig, request *models.HttpRequest, varProcessor *variables.VariableProcessor, envStore *session.EnvironmentStore) (*scripting.ScriptResult, error) {
+	return ExecutePreScriptWithContext(context.Background(), script, sessionCfg, request, varProcessor, envStore)
 }
 
 // ExecutePreScriptWithContext executes a pre-request script with context support.
-func ExecutePreScriptWithContext(ctx context.Context, script string, cfg *config.Config, request *models.HttpRequest, varProcessor *variables.VariableProcessor) (*scripting.ScriptResult, error) {
+func ExecutePreScriptWithContext(ctx context.Context, script string, sessionCfg *session.SessionConfig, request *models.HttpRequest, varProcessor *variables.VariableProcessor, envStore *session.EnvironmentStore) (*scripting.ScriptResult, error) {
 	scriptCtx := scripting.NewScriptContext()
 	scriptCtx.SetRequest(request)
 
-	// Load environment variables from secrets store
-	store, err := secrets.Load()
-	if err == nil && store.EnvironmentVariables != nil {
-		if shared, ok := store.EnvironmentVariables["$shared"]; ok {
+	// Load environment variables from per-session environment store
+	if envStore != nil && envStore.EnvironmentVariables != nil {
+		if shared, ok := envStore.EnvironmentVariables["$shared"]; ok {
 			for k, v := range shared {
 				scriptCtx.SetEnvVar(k, v)
 			}
 		}
-		if current, ok := store.EnvironmentVariables[cfg.CurrentEnvironment]; ok {
+		if current, ok := envStore.EnvironmentVariables[sessionCfg.CurrentEnvironment()]; ok {
 			for k, v := range current {
 				scriptCtx.SetEnvVar(k, v)
 			}

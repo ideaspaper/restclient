@@ -20,7 +20,7 @@ import (
 )
 
 // sendRequest sends an HTTP request with session management and scripting support
-func sendRequest(httpFilePath string, request *models.HttpRequest, cfg *config.Config, varProcessor *variables.VariableProcessor) error {
+func sendRequest(httpFilePath string, request *models.HttpRequest, sessionCfg *session.SessionConfig, varProcessor *variables.VariableProcessor, envStore *session.EnvironmentStore) error {
 	// Create context with cancellation support for interrupt signals
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -37,25 +37,26 @@ func sendRequest(httpFilePath string, request *models.HttpRequest, cfg *config.C
 	}()
 	defer signal.Stop(sigChan)
 
-	// Apply timeout from config if set
-	if cfg.TimeoutMs > 0 {
+	// Apply timeout from session config if set
+	if sessionCfg.HTTP.TimeoutMs > 0 {
 		var timeoutCancel context.CancelFunc
-		ctx, timeoutCancel = context.WithTimeout(ctx, time.Duration(cfg.TimeoutMs)*time.Millisecond)
+		ctx, timeoutCancel = context.WithTimeout(ctx, time.Duration(sessionCfg.HTTP.TimeoutMs)*time.Millisecond)
 		defer timeoutCancel()
 	}
 
 	opts := executor.Options{
-		HTTPFilePath: httpFilePath,
-		SessionName:  sessionName,
-		NoSession:    noSession,
-		NoHistory:    noHistory,
-		Verbose:      verbose,
+		HTTPFilePath:     httpFilePath,
+		SessionName:      sessionName,
+		NoSession:        noSession,
+		NoHistory:        noHistory,
+		Verbose:          verbose,
+		EnvironmentStore: envStore,
 		LogFunc: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, format+"\n", args...)
 		},
 	}
 
-	exec := executor.New(cfg, varProcessor, opts)
+	exec := executor.New(sessionCfg, varProcessor, opts)
 
 	// Print request info if verbose
 	if verbose {
@@ -145,7 +146,7 @@ func printRequestInfo(request *models.HttpRequest) {
 }
 
 // printDryRun displays a dry run of the request without sending it
-func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.Config) error {
+func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.Config, sessionCfg *session.SessionConfig) error {
 	colorsEnabled := useColors() && cfg.ShowColors
 	formatter := output.NewFormatter(colorsEnabled)
 
@@ -160,10 +161,11 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 		fmt.Printf("  %s: %s\n", formatKey(k), v)
 	}
 
-	if len(cfg.DefaultHeaders) > 0 {
+	defaultHeaders := sessionCfg.DefaultHeaders()
+	if len(defaultHeaders) > 0 {
 		fmt.Println()
-		fmt.Println("Default Headers (from config):")
-		for k, v := range cfg.DefaultHeaders {
+		fmt.Println("Default Headers (from session config):")
+		for k, v := range defaultHeaders {
 			// Skip if already set in request
 			if _, exists := request.Headers[k]; exists {
 				continue
@@ -172,7 +174,7 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 		}
 	}
 
-	if !noSession && cfg.RememberCookies && !request.Metadata.NoCookieJar {
+	if !noSession && sessionCfg.RememberCookies() && !request.Metadata.NoCookieJar {
 		sessionMgr, err := session.NewSessionManager("", httpFilePath, sessionName)
 		if err == nil {
 			if err := sessionMgr.Load(); err == nil {
@@ -208,13 +210,13 @@ func printDryRun(httpFilePath string, request *models.HttpRequest, cfg *config.C
 
 	fmt.Println()
 	fmt.Println("Request Settings:")
-	fmt.Printf("  Follow Redirects: %v\n", cfg.FollowRedirects && !request.Metadata.NoRedirect)
-	fmt.Printf("  Use Cookie Jar: %v\n", cfg.RememberCookies && !request.Metadata.NoCookieJar)
-	if cfg.TimeoutMs > 0 {
-		fmt.Printf("  Timeout: %dms\n", cfg.TimeoutMs)
+	fmt.Printf("  Follow Redirects: %v\n", sessionCfg.HTTP.FollowRedirect && !request.Metadata.NoRedirect)
+	fmt.Printf("  Use Cookie Jar: %v\n", sessionCfg.RememberCookies() && !request.Metadata.NoCookieJar)
+	if sessionCfg.HTTP.TimeoutMs > 0 {
+		fmt.Printf("  Timeout: %dms\n", sessionCfg.HTTP.TimeoutMs)
 	}
-	if cfg.Proxy != "" {
-		fmt.Printf("  Proxy: %s\n", cfg.Proxy)
+	if sessionCfg.TLS.Proxy != "" {
+		fmt.Printf("  Proxy: %s\n", sessionCfg.TLS.Proxy)
 	}
 
 	return nil

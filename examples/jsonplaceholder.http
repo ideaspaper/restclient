@@ -110,7 +110,7 @@ Content-Type: application/json
 ### Shared user input across URL and body
 # @name updateDynamicPost
 # Prompts for: postId (used in URL and body), newTitle, newBody
-PUT {{baseUrl}}/posts/{{:postId}}
+PUT {{baseUrl}}/posts/{{:id}}
 Content-Type: application/json
 
 {

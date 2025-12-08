@@ -2,14 +2,21 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/ideaspaper/restclient/pkg/config"
+	"github.com/ideaspaper/restclient/internal/filesystem"
 	"github.com/ideaspaper/restclient/pkg/errors"
-	"github.com/ideaspaper/restclient/pkg/secrets"
+	"github.com/ideaspaper/restclient/pkg/lastfile"
+	"github.com/ideaspaper/restclient/pkg/session"
+)
+
+var (
+	envSessionName string
+	envDirPath     string
 )
 
 // envCmd represents the env command
@@ -21,11 +28,11 @@ var envCmd = &cobra.Command{
 Environments allow you to define variables that can be used in your requests.
 Variables are referenced using {{variableName}} syntax.
 
-Environment variables are stored in a separate secrets file (~/.restclient/secrets.json)
-that should NOT be committed to version control.
+Environment variables are stored per-session in the session's environments.json file.
+Sessions are scoped by directory (based on the .http file location) or by an explicit --session name.
 
 Examples:
-  # List all environments
+  # List all environments (uses last file's session)
   restclient env list
 
   # Show current environment
@@ -44,7 +51,13 @@ Examples:
   restclient env create staging
 
   # Delete an environment
-  restclient env delete staging`,
+  restclient env delete staging
+  
+  # Use a specific named session
+  restclient env list --session my-api
+  
+  # Use a specific directory's session
+  restclient env list --dir /path/to/project`,
 }
 
 // envListCmd lists all environments
@@ -112,6 +125,12 @@ var envDeleteCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(envCmd)
 
+	// Add session/dir flags to all env subcommands
+	for _, cmd := range []*cobra.Command{envListCmd, envCurrentCmd, envUseCmd, envShowCmd, envSetCmd, envUnsetCmd, envCreateCmd, envDeleteCmd} {
+		cmd.Flags().StringVar(&envSessionName, "session", "", "use named session")
+		cmd.Flags().StringVar(&envDirPath, "dir", "", "use session for specific directory")
+	}
+
 	envCmd.AddCommand(envListCmd)
 	envCmd.AddCommand(envCurrentCmd)
 	envCmd.AddCommand(envUseCmd)
@@ -122,20 +141,60 @@ func init() {
 	envCmd.AddCommand(envDeleteCmd)
 }
 
+// getSessionContext returns the session path and config/store for the current context
+func getSessionContext() (string, *session.SessionConfig, *session.EnvironmentStore, error) {
+	var httpFilePath string
+
+	if envDirPath != "" {
+		// Use the provided directory path - create a fake file path to get the session
+		httpFilePath = envDirPath + "/dummy.http"
+	} else if envSessionName == "" {
+		// Try to use the last file
+		lastPath, err := lastfile.Load()
+		if err != nil || lastPath == "" {
+			// Fall back to current directory
+			cwd, err := os.Getwd()
+			if err != nil {
+				return "", nil, nil, errors.Wrap(err, "failed to get current directory")
+			}
+			httpFilePath = cwd + "/dummy.http"
+		} else {
+			httpFilePath = lastPath
+		}
+	}
+
+	// Create session manager to get the session path
+	sessionMgr, err := session.NewSessionManager("", httpFilePath, envSessionName)
+	if err != nil {
+		return "", nil, nil, errors.Wrap(err, "failed to create session manager")
+	}
+	sessionPath := sessionMgr.GetSessionPath()
+
+	// Load or create session config
+	sessionCfg, err := session.LoadOrCreateSessionConfig(filesystem.Default, sessionPath)
+	if err != nil {
+		return "", nil, nil, errors.Wrap(err, "failed to load session config")
+	}
+
+	// Load or create environment store
+	envStore, err := session.LoadOrCreateEnvironmentStore(filesystem.Default, sessionPath)
+	if err != nil {
+		return "", nil, nil, errors.Wrap(err, "failed to load session environments")
+	}
+
+	return sessionPath, sessionCfg, envStore, nil
+}
+
 func runEnvList(cmd *cobra.Command, args []string) error {
-	cfg, err := config.LoadOrCreateConfig()
+	sessionPath, sessionCfg, envStore, err := getSessionContext()
 	if err != nil {
-		return errors.Wrap(err, "failed to load config")
+		return err
 	}
 
-	store, err := secrets.Load()
-	if err != nil {
-		return errors.Wrap(err, "failed to load secrets")
-	}
-
-	envs := store.ListEnvironments()
+	envs := envStore.ListEnvironments()
 
 	printHeader("Available Environments:")
+	fmt.Printf("  (session: %s)\n", sessionPath)
 	fmt.Println()
 
 	if len(envs) == 0 {
@@ -148,12 +207,12 @@ func runEnvList(cmd *cobra.Command, args []string) error {
 	sort.Strings(envs)
 
 	for _, env := range envs {
-		marker := printMarker(env == cfg.CurrentEnvironment)
+		marker := printMarker(env == sessionCfg.Environment.Current)
 		fmt.Printf("%s%s\n", marker, env)
 	}
 
 	// Show $shared info
-	if shared, ok := store.GetVariables("$shared"); ok && len(shared) > 0 {
+	if shared, ok := envStore.GetVariables("$shared"); ok && len(shared) > 0 {
 		fmt.Println()
 		fmt.Printf("  $shared: %d variables (available in all environments)\n", len(shared))
 	}
@@ -162,17 +221,19 @@ func runEnvList(cmd *cobra.Command, args []string) error {
 }
 
 func runEnvCurrent(cmd *cobra.Command, args []string) error {
-	cfg, err := config.LoadOrCreateConfig()
+	sessionPath, sessionCfg, _, err := getSessionContext()
 	if err != nil {
-		return errors.Wrap(err, "failed to load config")
+		return err
 	}
 
-	if cfg.CurrentEnvironment == "" {
+	fmt.Printf("Session: %s\n", sessionPath)
+
+	if sessionCfg.Environment.Current == "" {
 		fmt.Println("No environment selected")
 		fmt.Println()
 		fmt.Println("Use: restclient env use <environment>")
 	} else {
-		fmt.Printf("Current environment: %s\n", cfg.CurrentEnvironment)
+		fmt.Printf("Current environment: %s\n", sessionCfg.Environment.Current)
 	}
 
 	return nil
@@ -181,24 +242,19 @@ func runEnvCurrent(cmd *cobra.Command, args []string) error {
 func runEnvUse(cmd *cobra.Command, args []string) error {
 	envName := args[0]
 
-	cfg, err := config.LoadOrCreateConfig()
+	sessionPath, sessionCfg, envStore, err := getSessionContext()
 	if err != nil {
-		return errors.Wrap(err, "failed to load config")
+		return err
 	}
 
-	store, err := secrets.Load()
-	if err != nil {
-		return errors.Wrap(err, "failed to load secrets")
-	}
-
-	// Validate that the environment exists in secrets
-	if !store.HasEnvironment(envName) && envName != "$shared" {
+	// Validate that the environment exists
+	if !envStore.HasEnvironment(envName) && envName != "$shared" {
 		return errors.NewValidationErrorWithValue("environment", envName, "not found")
 	}
 
-	cfg.CurrentEnvironment = envName
-	if err := cfg.Save(); err != nil {
-		return errors.Wrap(err, "failed to save config")
+	sessionCfg.Environment.Current = envName
+	if err := session.SaveSessionConfig(filesystem.Default, sessionPath, sessionCfg); err != nil {
+		return errors.Wrap(err, "failed to save session config")
 	}
 
 	fmt.Printf("Switched to environment: %s\n", envName)
@@ -206,17 +262,12 @@ func runEnvUse(cmd *cobra.Command, args []string) error {
 }
 
 func runEnvShow(cmd *cobra.Command, args []string) error {
-	cfg, err := config.LoadOrCreateConfig()
+	_, sessionCfg, envStore, err := getSessionContext()
 	if err != nil {
-		return errors.Wrap(err, "failed to load config")
+		return err
 	}
 
-	store, err := secrets.Load()
-	if err != nil {
-		return errors.Wrap(err, "failed to load secrets")
-	}
-
-	envName := cfg.CurrentEnvironment
+	envName := sessionCfg.Environment.Current
 	if len(args) > 0 {
 		envName = args[0]
 	}
@@ -226,14 +277,14 @@ func runEnvShow(cmd *cobra.Command, args []string) error {
 		envName = "$shared"
 	}
 
-	vars, ok := store.GetVariables(envName)
+	vars, ok := envStore.GetVariables(envName)
 	if !ok && envName != "$shared" {
 		return errors.NewValidationErrorWithValue("environment", envName, "environment not found")
 	}
 
 	// Show $shared first if showing a specific environment
 	if envName != "$shared" {
-		if shared, ok := store.GetVariables("$shared"); ok && len(shared) > 0 {
+		if shared, ok := envStore.GetVariables("$shared"); ok && len(shared) > 0 {
 			printHeader("$shared variables:")
 			printVariables(shared)
 			fmt.Println()
@@ -255,17 +306,17 @@ func runEnvSet(cmd *cobra.Command, args []string) error {
 	varName := args[1]
 	varValue := args[2]
 
-	store, err := secrets.Load()
+	sessionPath, _, envStore, err := getSessionContext()
 	if err != nil {
-		return errors.Wrap(err, "failed to load secrets")
-	}
-
-	if err := store.SetVariable(envName, varName, varValue); err != nil {
 		return err
 	}
 
-	if err := store.Save(); err != nil {
-		return errors.Wrap(err, "failed to save secrets")
+	if err := envStore.SetVariable(envName, varName, varValue); err != nil {
+		return err
+	}
+
+	if err := session.SaveEnvironmentStore(filesystem.Default, sessionPath, envStore); err != nil {
+		return errors.Wrap(err, "failed to save session environments")
 	}
 
 	fmt.Printf("Set %s=%s in environment '%s'\n", varName, maskValue(varValue), envName)
@@ -276,17 +327,17 @@ func runEnvUnset(cmd *cobra.Command, args []string) error {
 	envName := args[0]
 	varName := args[1]
 
-	store, err := secrets.Load()
+	sessionPath, _, envStore, err := getSessionContext()
 	if err != nil {
-		return errors.Wrap(err, "failed to load secrets")
-	}
-
-	if err := store.UnsetVariable(envName, varName); err != nil {
 		return err
 	}
 
-	if err := store.Save(); err != nil {
-		return errors.Wrap(err, "failed to save secrets")
+	if err := envStore.UnsetVariable(envName, varName); err != nil {
+		return err
+	}
+
+	if err := session.SaveEnvironmentStore(filesystem.Default, sessionPath, envStore); err != nil {
+		return errors.Wrap(err, "failed to save session environments")
 	}
 
 	fmt.Printf("Removed %s from environment '%s'\n", varName, envName)
@@ -296,21 +347,21 @@ func runEnvUnset(cmd *cobra.Command, args []string) error {
 func runEnvCreate(cmd *cobra.Command, args []string) error {
 	envName := args[0]
 
-	store, err := secrets.Load()
+	sessionPath, _, envStore, err := getSessionContext()
 	if err != nil {
-		return errors.Wrap(err, "failed to load secrets")
-	}
-
-	if store.HasEnvironment(envName) {
-		return errors.NewValidationErrorWithValue("environment", envName, "environment already exists")
-	}
-
-	if err := store.AddEnvironment(envName, nil); err != nil {
 		return err
 	}
 
-	if err := store.Save(); err != nil {
-		return errors.Wrap(err, "failed to save secrets")
+	if envStore.HasEnvironment(envName) {
+		return errors.NewValidationErrorWithValue("environment", envName, "environment already exists")
+	}
+
+	if err := envStore.AddEnvironment(envName, nil); err != nil {
+		return err
+	}
+
+	if err := session.SaveEnvironmentStore(filesystem.Default, sessionPath, envStore); err != nil {
+		return errors.Wrap(err, "failed to save session environments")
 	}
 
 	fmt.Printf("Created environment: %s\n", envName)
@@ -322,29 +373,24 @@ func runEnvCreate(cmd *cobra.Command, args []string) error {
 func runEnvDelete(cmd *cobra.Command, args []string) error {
 	envName := args[0]
 
-	cfg, err := config.LoadOrCreateConfig()
+	sessionPath, sessionCfg, envStore, err := getSessionContext()
 	if err != nil {
-		return errors.Wrap(err, "failed to load config")
-	}
-
-	store, err := secrets.Load()
-	if err != nil {
-		return errors.Wrap(err, "failed to load secrets")
-	}
-
-	if err := store.RemoveEnvironment(envName); err != nil {
 		return err
 	}
 
-	if err := store.Save(); err != nil {
-		return errors.Wrap(err, "failed to save secrets")
+	if err := envStore.RemoveEnvironment(envName); err != nil {
+		return err
+	}
+
+	if err := session.SaveEnvironmentStore(filesystem.Default, sessionPath, envStore); err != nil {
+		return errors.Wrap(err, "failed to save session environments")
 	}
 
 	// Clear current environment if it was the deleted one
-	if cfg.CurrentEnvironment == envName {
-		cfg.CurrentEnvironment = ""
-		if err := cfg.Save(); err != nil {
-			return errors.Wrap(err, "failed to save config")
+	if sessionCfg.Environment.Current == envName {
+		sessionCfg.Environment.Current = ""
+		if err := session.SaveSessionConfig(filesystem.Default, sessionPath, sessionCfg); err != nil {
+			return errors.Wrap(err, "failed to save session config")
 		}
 	}
 

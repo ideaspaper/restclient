@@ -1,7 +1,6 @@
 package userinput
 
 import (
-	"github.com/ideaspaper/restclient/pkg/session"
 	"github.com/ideaspaper/restclient/pkg/tui"
 )
 
@@ -14,22 +13,27 @@ type ProcessResult struct {
 	Secrets  map[string]bool   // Which parameters are marked as secrets
 }
 
-// Prompter handles prompting users for input values with session integration.
+// Prompter handles prompting users for input values.
+// Values are collected during a single request execution and not persisted.
 type Prompter struct {
-	session     *session.SessionManager
-	detector    *Detector
-	forcePrompt bool
-	useColors   bool
+	detector  *Detector
+	useColors bool
+	// collectedValues stores values collected during the current request execution
+	// This allows sharing values between URL, headers, body within the same request
+	collectedValues map[string]string
+	// collectedSecrets tracks which collected values are secrets
+	collectedSecrets map[string]bool
 }
 
-// NewPrompter creates a new prompter with session integration.
-// If forcePrompt is true, the user will always be prompted even if values exist in session.
-func NewPrompter(session *session.SessionManager, forcePrompt bool, useColors bool) *Prompter {
+// NewPrompter creates a new prompter.
+// The forcePrompt parameter is kept for API compatibility but is ignored since
+// prompts always happen now (no session persistence).
+func NewPrompter(_ interface{}, forcePrompt bool, useColors bool) *Prompter {
 	return &Prompter{
-		session:     session,
-		detector:    NewDetector(),
-		forcePrompt: forcePrompt,
-		useColors:   useColors,
+		detector:         NewDetector(),
+		useColors:        useColors,
+		collectedValues:  make(map[string]string),
+		collectedSecrets: make(map[string]bool),
 	}
 }
 
@@ -51,78 +55,56 @@ func (p *Prompter) ProcessURL(url string) (*ProcessResult, error) {
 		}, nil
 	}
 
-	// Generate session key for this URL pattern
-	urlKey := p.detector.GenerateKey(url)
-
-	// Get stored entries from session
-	storedEntries := make(map[string]session.UserInputEntry)
-	if p.session != nil {
-		if stored := p.session.GetUserInputs(urlKey); stored != nil {
-			storedEntries = stored
-		}
-	}
-
-	// Build a map of which parameters are secrets (from patterns or stored entries)
+	// Build a map of which parameters are secrets (from patterns)
 	secrets := make(map[string]bool)
 	for _, pattern := range patterns {
 		if pattern.IsSecret {
 			secrets[pattern.Name] = true
-		} else if entry, ok := storedEntries[pattern.Name]; ok && entry.IsSecret {
-			secrets[pattern.Name] = true
 		}
 	}
 
-	// Determine if we need to prompt
-	needPrompt := p.forcePrompt
-	if !needPrompt {
-		// Check if any pattern is missing a value
-		for _, pattern := range patterns {
-			if _, ok := storedEntries[pattern.Name]; !ok {
-				needPrompt = true
-				break
-			}
+	// Check which patterns need prompting (not already collected in this request)
+	var patternsToPrompt []Pattern
+	for _, pattern := range patterns {
+		if _, ok := p.collectedValues[pattern.Name]; !ok {
+			patternsToPrompt = append(patternsToPrompt, pattern)
 		}
 	}
 
-	var values map[string]string
+	needPrompt := len(patternsToPrompt) > 0
+
 	if needPrompt {
 		// Build input fields for the form
-		fields := make([]tui.InputField, len(patterns))
-		for i, pattern := range patterns {
-			defaultVal := ""
-			if entry, ok := storedEntries[pattern.Name]; ok {
-				defaultVal = entry.Value
-			}
+		fields := make([]tui.InputField, len(patternsToPrompt))
+		for i, pattern := range patternsToPrompt {
 			fields[i] = tui.InputField{
 				Name:     pattern.Name,
-				Default:  defaultVal,
+				Default:  "",
 				IsSecret: secrets[pattern.Name],
 			}
 		}
 
 		// Show the input form
-		var err error
-		values, err = tui.RunInputForm(fields, p.useColors)
+		newValues, err := tui.RunInputForm(fields, p.useColors)
 		if err != nil {
 			return nil, err
 		}
 
-		// Save the new values to session with secret metadata
-		if p.session != nil {
-			entries := make(map[string]session.UserInputEntry, len(values))
-			for k, v := range values {
-				entries[k] = session.UserInputEntry{
-					Value:    v,
-					IsSecret: secrets[k],
-				}
+		// Store the new values in collected values for this request
+		for k, v := range newValues {
+			p.collectedValues[k] = v
+			if secrets[k] {
+				p.collectedSecrets[k] = true
 			}
-			p.session.SetUserInputs(urlKey, entries)
 		}
-	} else {
-		// Use stored values
-		values = make(map[string]string, len(storedEntries))
-		for k, entry := range storedEntries {
-			values[k] = entry.Value
+	}
+
+	// Build values map from collected values
+	values := make(map[string]string, len(patterns))
+	for _, pattern := range patterns {
+		values[pattern.Name] = p.collectedValues[pattern.Name]
+		if p.collectedSecrets[pattern.Name] {
+			secrets[pattern.Name] = true
 		}
 	}
 
@@ -139,6 +121,7 @@ func (p *Prompter) ProcessURL(url string) (*ProcessResult, error) {
 
 // ProcessContent processes user input patterns in any content string.
 // This can be used for headers, body, or other content.
+// The urlKey parameter is kept for API compatibility but is ignored.
 func (p *Prompter) ProcessContent(content string, urlKey string) (string, error) {
 	// Detect patterns in content
 	patterns := p.detector.Detect(content)
@@ -146,73 +129,52 @@ func (p *Prompter) ProcessContent(content string, urlKey string) (string, error)
 		return content, nil
 	}
 
-	// Get stored entries from session
-	storedEntries := make(map[string]session.UserInputEntry)
-	if p.session != nil {
-		if stored := p.session.GetUserInputs(urlKey); stored != nil {
-			storedEntries = stored
-		}
-	}
-
-	// Build a map of which parameters are secrets (from patterns or stored entries)
+	// Build a map of which parameters are secrets (from patterns)
 	secrets := make(map[string]bool)
 	for _, pattern := range patterns {
 		if pattern.IsSecret {
 			secrets[pattern.Name] = true
-		} else if entry, ok := storedEntries[pattern.Name]; ok && entry.IsSecret {
-			secrets[pattern.Name] = true
 		}
 	}
 
-	// Determine if we need to prompt
-	needPrompt := p.forcePrompt
-	if !needPrompt {
-		for _, pattern := range patterns {
-			if _, ok := storedEntries[pattern.Name]; !ok {
-				needPrompt = true
-				break
-			}
+	// Check which patterns need prompting (not already collected in this request)
+	var patternsToPrompt []Pattern
+	for _, pattern := range patterns {
+		if _, ok := p.collectedValues[pattern.Name]; !ok {
+			patternsToPrompt = append(patternsToPrompt, pattern)
 		}
 	}
 
-	var values map[string]string
+	needPrompt := len(patternsToPrompt) > 0
+
 	if needPrompt {
-		fields := make([]tui.InputField, len(patterns))
-		for i, pattern := range patterns {
-			defaultVal := ""
-			if entry, ok := storedEntries[pattern.Name]; ok {
-				defaultVal = entry.Value
-			}
+		fields := make([]tui.InputField, len(patternsToPrompt))
+		for i, pattern := range patternsToPrompt {
 			fields[i] = tui.InputField{
 				Name:     pattern.Name,
-				Default:  defaultVal,
+				Default:  "",
 				IsSecret: secrets[pattern.Name],
 			}
 		}
 
-		var err error
-		values, err = tui.RunInputForm(fields, p.useColors)
+		newValues, err := tui.RunInputForm(fields, p.useColors)
 		if err != nil {
 			return "", err
 		}
 
-		// Save the new values to session with secret metadata
-		if p.session != nil {
-			entries := make(map[string]session.UserInputEntry, len(values))
-			for k, v := range values {
-				entries[k] = session.UserInputEntry{
-					Value:    v,
-					IsSecret: secrets[k],
-				}
+		// Store the new values in collected values for this request
+		for k, v := range newValues {
+			p.collectedValues[k] = v
+			if secrets[k] {
+				p.collectedSecrets[k] = true
 			}
-			p.session.SetUserInputs(urlKey, entries)
 		}
-	} else {
-		// Use stored values
-		values = make(map[string]string, len(storedEntries))
-		for k, entry := range storedEntries {
-			values[k] = entry.Value
-		}
+	}
+
+	// Build values map from collected values
+	values := make(map[string]string, len(patterns))
+	for _, pattern := range patterns {
+		values[pattern.Name] = p.collectedValues[pattern.Name]
 	}
 
 	// Use ReplaceRaw for content (headers, body, multipart) - no URL encoding needed
@@ -226,6 +188,21 @@ func (p *Prompter) HasPatterns(url string) bool {
 }
 
 // GenerateKey creates a session storage key from a URL pattern.
+// This method is kept for API compatibility but the key is not used for persistence.
 func (p *Prompter) GenerateKey(url string) string {
 	return p.detector.GenerateKey(url)
+}
+
+// SetValues allows pre-setting values (useful for testing or programmatic use).
+func (p *Prompter) SetValues(values map[string]string) {
+	for k, v := range values {
+		p.collectedValues[k] = v
+	}
+}
+
+// SetSecrets marks specific parameters as secrets.
+func (p *Prompter) SetSecrets(secrets map[string]bool) {
+	for k, v := range secrets {
+		p.collectedSecrets[k] = v
+	}
 }

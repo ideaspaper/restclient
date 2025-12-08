@@ -1,21 +1,18 @@
-// Package config provides application configuration management with support
-// for JSON config files, viper integration, and hot-reloading.
+// Package config provides global application configuration management.
+// This only contains CLI display preferences. All HTTP behavior settings
+// are stored per-session in session config files.
 package config
 
 import (
 	"encoding/json"
-	"maps"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
-	"github.com/ideaspaper/restclient/internal/constants"
 	"github.com/ideaspaper/restclient/internal/paths"
-	"github.com/ideaspaper/restclient/pkg/client"
 	"github.com/ideaspaper/restclient/pkg/errors"
 )
 
@@ -24,33 +21,11 @@ const (
 	configFileType = "json"
 )
 
-// Config represents the application configuration.
-// Note: Environment variables are stored separately in secrets.json for security.
-// This config file is safe to commit to version control.
+// Config represents the global application configuration.
+// This only contains CLI display preferences. All HTTP behavior settings
+// are stored per-session in session config files.
 type Config struct {
-	// HTTP client settings
-	FollowRedirects bool `json:"followRedirect" mapstructure:"followRedirect"`
-	TimeoutMs       int  `json:"timeoutInMilliseconds" mapstructure:"timeoutInMilliseconds"`
-	RememberCookies bool `json:"rememberCookiesForSubsequentRequests" mapstructure:"rememberCookiesForSubsequentRequests"`
-
-	// Default headers
-	DefaultHeaders map[string]string `json:"defaultHeaders" mapstructure:"defaultHeaders"`
-
-	// Current environment (the selected environment name, actual values are in secrets.json)
-	CurrentEnvironment string `json:"currentEnvironment" mapstructure:"currentEnvironment"`
-
-	// SSL settings
-	InsecureSSL    bool `json:"insecureSSL" mapstructure:"insecureSSL"`
-	ProxyStrictSSL bool `json:"proxyStrictSSL" mapstructure:"proxyStrictSSL"`
-
-	// Proxy settings
-	Proxy                string   `json:"proxy" mapstructure:"proxy"`
-	ExcludeHostsForProxy []string `json:"excludeHostsForProxy" mapstructure:"excludeHostsForProxy"`
-
-	// Certificates
-	Certificates map[string]CertificateConfig `json:"certificates" mapstructure:"certificates"`
-
-	// Display settings
+	// Display settings (CLI preferences)
 	PreviewOption string `json:"previewOption" mapstructure:"previewOption"` // full, headers, body, exchange
 	ShowColors    bool   `json:"showColors" mapstructure:"showColors"`
 
@@ -59,29 +34,11 @@ type Config struct {
 	configPath string       `json:"-" mapstructure:"-"`
 }
 
-// CertificateConfig holds certificate paths
-type CertificateConfig struct {
-	Cert       string `json:"cert,omitempty" mapstructure:"cert"`
-	Key        string `json:"key,omitempty" mapstructure:"key"`
-	PFX        string `json:"pfx,omitempty" mapstructure:"pfx"`
-	Passphrase string `json:"passphrase,omitempty" mapstructure:"passphrase"`
-}
-
 // DefaultConfig returns a new config with default values
 func DefaultConfig() *Config {
 	return &Config{
-		FollowRedirects: true,
-		TimeoutMs:       0,
-		RememberCookies: true,
-		DefaultHeaders: map[string]string{
-			constants.HeaderUserAgent: constants.DefaultUserAgent,
-		},
-		CurrentEnvironment: "",
-		InsecureSSL:        false,
-		ProxyStrictSSL:     true,
-		Certificates:       make(map[string]CertificateConfig),
-		PreviewOption:      "full",
-		ShowColors:         true,
+		PreviewOption: "full",
+		ShowColors:    true,
 	}
 }
 
@@ -89,14 +46,6 @@ func DefaultConfig() *Config {
 // This should be used by cmd/root.go to avoid duplicating default values.
 func SetViperDefaults(v *viper.Viper) {
 	defaults := DefaultConfig()
-	v.SetDefault("followRedirect", defaults.FollowRedirects)
-	v.SetDefault("timeoutInMilliseconds", defaults.TimeoutMs)
-	v.SetDefault("rememberCookiesForSubsequentRequests", defaults.RememberCookies)
-	v.SetDefault("defaultHeaders", defaults.DefaultHeaders)
-	v.SetDefault("currentEnvironment", defaults.CurrentEnvironment)
-	v.SetDefault("insecureSSL", defaults.InsecureSSL)
-	v.SetDefault("proxyStrictSSL", defaults.ProxyStrictSSL)
-	v.SetDefault("certificates", defaults.Certificates)
 	v.SetDefault("previewOption", defaults.PreviewOption)
 	v.SetDefault("showColors", defaults.ShowColors)
 }
@@ -156,14 +105,6 @@ func LoadConfigFromDir(dir string) (*Config, error) {
 	cfg.v = v
 	cfg.configPath = configPath
 
-	// Ensure maps are initialized
-	if cfg.DefaultHeaders == nil {
-		cfg.DefaultHeaders = make(map[string]string)
-	}
-	if cfg.Certificates == nil {
-		cfg.Certificates = make(map[string]CertificateConfig)
-	}
-
 	return cfg, nil
 }
 
@@ -199,14 +140,6 @@ func LoadConfigFromFile(filePath string) (*Config, error) {
 	cfg.v = v
 	cfg.configPath = filePath
 
-	// Ensure maps are initialized
-	if cfg.DefaultHeaders == nil {
-		cfg.DefaultHeaders = make(map[string]string)
-	}
-	if cfg.Certificates == nil {
-		cfg.Certificates = make(map[string]CertificateConfig)
-	}
-
 	return cfg, nil
 }
 
@@ -231,48 +164,10 @@ func (c *Config) Save() error {
 		c.v = viper.New()
 	}
 
-	c.v.Set("followRedirect", c.FollowRedirects)
-	c.v.Set("timeoutInMilliseconds", c.TimeoutMs)
-	c.v.Set("rememberCookiesForSubsequentRequests", c.RememberCookies)
-	c.v.Set("defaultHeaders", c.DefaultHeaders)
-	c.v.Set("currentEnvironment", c.CurrentEnvironment)
-	c.v.Set("insecureSSL", c.InsecureSSL)
-	c.v.Set("proxyStrictSSL", c.ProxyStrictSSL)
-	c.v.Set("proxy", c.Proxy)
-	c.v.Set("excludeHostsForProxy", c.ExcludeHostsForProxy)
-	c.v.Set("certificates", c.Certificates)
 	c.v.Set("previewOption", c.PreviewOption)
 	c.v.Set("showColors", c.ShowColors)
 
 	return c.v.WriteConfigAs(c.configPath)
-}
-
-// ToClientConfig converts Config to client.ClientConfig
-func (c *Config) ToClientConfig() *client.ClientConfig {
-	cfg := client.DefaultConfig()
-
-	cfg.FollowRedirects = c.FollowRedirects
-	cfg.InsecureSSL = c.InsecureSSL
-	cfg.RememberCookies = c.RememberCookies
-	cfg.Proxy = c.Proxy
-	cfg.ExcludeProxy = c.ExcludeHostsForProxy
-
-	if c.TimeoutMs > 0 {
-		cfg.Timeout = time.Duration(c.TimeoutMs) * time.Millisecond
-	}
-
-	maps.Copy(cfg.DefaultHeaders, c.DefaultHeaders)
-
-	for host, cert := range c.Certificates {
-		cfg.Certificates[host] = client.Certificate{
-			Cert:       cert.Cert,
-			Key:        cert.Key,
-			PFX:        cert.PFX,
-			Passphrase: cert.Passphrase,
-		}
-	}
-
-	return cfg
 }
 
 // LoadOrCreateConfig loads existing config or creates a new one with defaults
