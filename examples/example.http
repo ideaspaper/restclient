@@ -1,6 +1,6 @@
-### restclient Examples
-### This file demonstrates the features of restclient using JSONPlaceholder API.
-### https://jsonplaceholder.typicode.com
+# restclient Examples
+# This file demonstrates the features of restclient using JSONPlaceholder API.
+# https://jsonplaceholder.typicode.com
 
 @baseUrl = https://jsonplaceholder.typicode.com
 
@@ -238,8 +238,6 @@ client.global.set("userName", response.body.name);
 client.log("Stored user: " + response.body.name);
 %}
 
-###
-
 ### Use stored values from previous request
 # @name chainStep2_GetUserPosts
 # Uses userId stored from chainStep1_GetUser
@@ -327,8 +325,6 @@ Content-Type: application/json
     "body": "This post will be referenced",
     "userId": 1
 }
-
-###
 
 ### Reference the previous response using request variables
 # @name useCreatedPost
