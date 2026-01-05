@@ -65,6 +65,7 @@ go build -o restclient .
     Authorization: Bearer {{token}}
 
     ### Create user
+    # @name createUser
     POST {{baseUrl}}/users
     Content-Type: application/json
 
