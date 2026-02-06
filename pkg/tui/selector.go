@@ -163,8 +163,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.filtered) > 0 {
 				m.selected = m.filtered[m.cursor].item
 				m.selectedIndex = m.filtered[m.cursor].originalIdx
+				return m, tea.Quit
 			}
-			return m, tea.Quit
+			return m, nil
 
 		case "up", "ctrl+p":
 			if m.cursor > 0 {
